@@ -195,7 +195,9 @@ def find_typhoon_center(data_array, lat_arr, lon_arr, init_lat, init_lon):
 def extract_pangu_forecast(iso_time, best_lat, best_lon, base_time, data_source, prev_center=None, files_dict=None):
     """
     从 Pangu 模型预报输出（npy 文件）中提取最低气压中心，
-    使用两步链式搜索方法（与 ECMWF 保持一致）。
+    使用两步链式搜索方法（与 ECMWF 保持一致）：
+      - 使用 np.linspace 构造全局经纬度网格
+      - 截取指定区域，使用 find_typhoon_center 进行链式搜索
     """
     forecast_hour = int((iso_time - base_time).total_seconds() // 3600)
     if files_dict is not None and forecast_hour in files_dict:
@@ -215,11 +217,15 @@ def extract_pangu_forecast(iso_time, best_lat, best_lon, base_time, data_source,
     full_lons = np.linspace(0, 360, nx)
     full_lats = np.linspace(90, -90, ny)
     
-    # 取消原先对特定区域(lon_min, lon_max, lat_min, lat_max)的筛选，
-    # 改为使用完整的经纬度网格进行台风中心搜索
-    region_data = data
-    region_lons = full_lons
-    region_lats = full_lats
+    # 截取指定感兴趣区域
+    lon_mask = (full_lons >= lon_min) & (full_lons <= lon_max)
+    lat_mask = (full_lats <= lat_max) & (full_lats >= lat_min)
+    if not lon_mask.any() or not lat_mask.any():
+        print(f"指定区域({lon_min}~{lon_max}, {lat_min}~{lat_max})超出数据范围")
+        return {'MinPressure': np.nan, 'Lat': best_lat, 'Lon': best_lon}
+    region_data = data[np.ix_(np.where(lat_mask)[0], np.where(lon_mask)[0])]
+    region_lons = full_lons[lon_mask]
+    region_lats = full_lats[lat_mask]
     
     # 使用两步链式搜索确定台风中心
     init_lat = prev_center[0] if prev_center is not None else best_lat
@@ -346,12 +352,12 @@ def main():
     """主函数调整路径配置"""
     global data_source, output_dir, output_image_path, output_path, input_path
     data_source = 'ERA5'  # 可根据需要改为GFS
-    output_dir = 'raw_data'  # 修改原始数据存储目录
-    output_image_path = "output_png"
-    output_path = os.path.join("output_data", "pangu")
-    input_path = "input"
+    output_dir = 'terrain_raw_data'  # 修改原始数据存储目录
+    output_image_path = "terrain_output_png"
+    output_path = os.path.join("output_data", "pangu_terrain")
+    input_path = "terrain_input"
     global NEW_DIR
-    NEW_DIR = os.path.join("topo-influ-csv", "new_")  # 修改输出目录
+    NEW_DIR = os.path.join("topo-influ-csv", "compared_results")  # 修改输出目录
     
     # 初始化地理范围（根据地形影响区域调整）
     lon_min = 115   # 缩小经度范围
@@ -363,9 +369,6 @@ def main():
     # 创建必要目录
     os.makedirs(NEW_DIR, exist_ok=True)
     os.makedirs(output_image_path, exist_ok=True)
-    os.makedirs(output_path, exist_ok=True)
-    os.makedirs(input_path, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
     
     process_all_csv()
 

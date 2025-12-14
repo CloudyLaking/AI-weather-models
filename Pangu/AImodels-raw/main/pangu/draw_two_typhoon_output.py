@@ -14,7 +14,7 @@ def haversine(lon1, lat1, lon2, lat2):
     dlon = lon2 - lon1 
     dlat = lat2 - lat1 
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.asin(math.sqrt(a))
+    c = 2 * math.asin(math.sqrt(a)) 
     r = 6371  # 地球平均半径，单位公里
     return c * r
 
@@ -23,7 +23,7 @@ def process_files(folder_path):
     all_data = []
     
     for file in glob.glob(os.path.join(folder_path, "*.csv")):
-        print(f"Processing file: {file}")
+        print(f"Processing file: {file}")   
         df = pd.read_csv(file)
         
         # 转换时间格式
@@ -69,14 +69,11 @@ def process_files(folder_path):
 folder_path = r"two-typhoon-csv\new_"
 df = process_files(folder_path)
 
-# 设置时效限制，只保留 120h 内的记录
-df = df[df['lead_time'] <= 120]
-
 # 打印误差超过5000 km 的记录及其数据来源
 print("误差超过5000 km 的记录：")
 print(df[df['error'] > 5000])
 
-# 绘图部分
+# 绘图部分保持不变
 plt.figure(figsize=(12, 6))
 for model in ['Pangu', 'ECMWF']:
     model_data = df[df['model'] == model]
