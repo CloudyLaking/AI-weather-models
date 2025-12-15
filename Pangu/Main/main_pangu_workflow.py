@@ -7,6 +7,23 @@ import argparse
 from datetime import datetime, timedelta
 import numpy as np
 import importlib.util
+import warnings
+
+# 抑制临时文件清理错误（Windows特定）
+import atexit
+def _suppress_tempfile_cleanup_errors():
+    """抑制 earthkit 退出时的临时文件清理权限错误"""
+    original_atexit_register = atexit.register
+    def patched_atexit_register(func, *args, **kwargs):
+        def wrapped(*args, **kwargs):
+            try:
+                func(*args, **kwargs)
+            except (PermissionError, OSError, NotADirectoryError):
+                pass  # 忽略文件清理错误
+        return original_atexit_register(wrapped, *args, **kwargs)
+    atexit.register = patched_atexit_register
+
+_suppress_tempfile_cleanup_errors()
 
 # Import from local modules
 try:
@@ -136,6 +153,38 @@ def run_complete_workflow(data_source='GFS', init_datetime_str=None, model_type=
         
         print(f"[OK] Data acquisition completed successfully")
         
+        # ===== 绘制初始场 =====
+        if draw_results:
+            print(f"\n[INFO] Plotting initial conditions...")
+            try:
+                from draw_pangu_results import PanguResultDrawer
+                drawer = PanguResultDrawer(output_dir=image_dir)
+                
+                # 加载初始数据
+                raw_surface = np.load(surface_file)
+                raw_upper = np.load(upper_file)
+                
+                data_dict_plot = {
+                    'mslp': raw_surface[0] / 100,  # Pa -> hPa
+                    'u10': raw_surface[1],
+                    'v10': raw_surface[2],
+                    't2m': raw_surface[3],
+                }
+                
+                # 绘制初始场风场和气压
+                wind_file = drawer.draw_mslp_and_wind(
+                    data_dict_plot, init_datetime_str, 0,
+                    data_source=data_source,
+                    lon_range=lon_range,
+                    lat_range=lat_range
+                )
+                if wind_file:
+                    results['image_files'].append(wind_file)
+                    print(f"  [OK] Initial MSLP/wind saved: {wind_file}")
+                
+            except Exception as e:
+                print(f"  [WARN] Failed to plot initial conditions: {e}")
+        
     except Exception as e:
         print(f"[ERROR] Data acquisition error: {e}")
         results['status'] = 'failed'
@@ -235,20 +284,7 @@ def run_complete_workflow(data_source='GFS', init_datetime_str=None, model_type=
                         results['image_files'].append(wind_file)
                 except Exception as e:
                     print(f"[WARN] Failed to draw MSLP/wind for +{forecast_hour:03d}h: {e}")
-                
-                # Draw temperature
-                try:
-                    temp_file = drawer.draw_temperature_field(
-                        data_dict, init_datetime_str, forecast_hour,
-                        data_source=data_source,
-                        lon_range=lon_range,
-                        lat_range=lat_range
-                    )
-                    if temp_file:
-                        results['image_files'].append(temp_file)
-                except Exception as e:
-                    print(f"[WARN] Failed to draw temperature for +{forecast_hour:03d}h: {e}")
-            
+
             if results['image_files']:
                 print(f"[OK] Visualization completed successfully with {len(results['image_files'])} images")
             else:
@@ -282,7 +318,14 @@ def run_complete_workflow(data_source='GFS', init_datetime_str=None, model_type=
         print(f"   Errors:         {len(results['errors'])}")
         for err in results['errors']:
             print(f"     - {err}")
-    print("="*70 + "\n")
+    print("="*70)
+    
+    # 显示生成的图片位置
+    if results['image_files']:
+        print("\n[INFO] Generated images saved at:")
+        for img_file in results['image_files']:
+            print(f"  → {img_file}")
+    print()
     
     results['status'] = 'completed'
     results['end_time'] = workflow_end.strftime('%Y-%m-%d %H:%M:%S')

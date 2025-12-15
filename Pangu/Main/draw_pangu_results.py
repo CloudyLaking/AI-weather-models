@@ -32,6 +32,21 @@ class PanguResultDrawer:
         self.output_dir = output_dir
         self.figsize = figsize
         os.makedirs(self.output_dir, exist_ok=True)
+    
+    def _get_output_path(self, filename, data_source='GFS'):
+        """
+        根据数据源获取输出路径，自动在数据源子文件夹中保存
+        
+        参数:
+            filename: 图片文件名
+            data_source: 数据源名称 (GFS, ERA5, ECMWF等)
+            
+        返回:
+            str: 完整的输出文件路径
+        """
+        source_dir = os.path.join(self.output_dir, data_source.upper())
+        os.makedirs(source_dir, exist_ok=True)
+        return os.path.join(source_dir, filename)
 
     def draw_mslp_and_wind(self, data_dict, init_datetime_str, forecast_hour,
                            data_source='GFS', lon_range=None, lat_range=None):
@@ -167,14 +182,13 @@ class PanguResultDrawer:
             loc='right', fontsize=14   
         )
 
-        # 保存图片
-        filename = f'pangu_mslp_wind_{init_datetime_str}+{forecast_hour:03d}h_{data_source}.png'
-        filepath = os.path.join(self.output_dir, filename)
+        # 保存图片到数据源对应的子文件夹
+        filename = f'pangu_mslp_wind_{init_datetime_str}+{forecast_hour:03d}h.png'
+        filepath = self._get_output_path(filename, data_source)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close()
 
         return filepath
-
 
 def draw_pangu_results(output_surface_path, init_datetime_str, forecast_hour,
                        data_source='GFS', lon_range=None, lat_range=None):

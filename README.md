@@ -9,9 +9,9 @@
 - Input、Output、Models-weights、Run-output-png 等数据目录与小 AI-weather-models 文件夹**平行**，位于工作区根目录
 
 工作区暂时包含三个主要天气预报模型：
-- **Pangu**：小时级别天气预报模型
+- **Pangu**：小时级别天气预报模型      ECMWF\GFS驱动还有问题
 - **Fuxi**：中期天气预报模型  
-- **AIFS**：欧洲中期天气预报中心的 AI 模型
+- **AIFS**：欧洲中期天气预报中心的 AI 模型   
 
 ## 工作区整体结构
 
