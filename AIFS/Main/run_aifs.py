@@ -33,10 +33,20 @@ class AIFSRunner:
             model_path: 本地模型文件路径，为 None 则尝试使用默认本地路径或 Hugging Face
             output_dir: 输出数据目录
         """
-        # 如果是相对路径，则基于当前脚本所在目录转换为绝对路径
-        if not os.path.isabs(output_dir):
+        # 自动定位项目根目录
+        project_root = os.getcwd()
+        if not os.path.exists(os.path.join(project_root, 'Models-weights')):
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            output_dir = os.path.normpath(os.path.join(script_dir, output_dir))
+            current = script_dir
+            for _ in range(4):
+                if os.path.exists(os.path.join(current, 'Models-weights')):
+                    project_root = current
+                    break
+                current = os.path.dirname(current)
+        
+        # 处理输出目录路径
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.normpath(os.path.join(project_root, output_dir))
         
         self.output_dir = output_dir
         self.device = device
@@ -44,11 +54,9 @@ class AIFSRunner:
         
         # 确定模型路径
         if model_path is None:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.normpath(os.path.join(script_dir, self.DEFAULT_LOCAL_MODEL))
+            model_path = os.path.normpath(os.path.join(project_root, self.DEFAULT_LOCAL_MODEL))
         elif not os.path.isabs(model_path):
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.normpath(os.path.join(script_dir, model_path))
+            model_path = os.path.normpath(os.path.join(project_root, model_path))
         
         self.model_path = model_path
         self.use_local_model = os.path.exists(self.model_path)

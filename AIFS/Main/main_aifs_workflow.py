@@ -3,11 +3,10 @@
 
 import os
 import sys
-import argparse
 from datetime import datetime, timedelta
 import atexit
 
-# 抑制临时文件清理错误（Windows特定）
+# 抑制临时文件清理错误(Windows特定)
 def _suppress_tempfile_cleanup_errors():
     """抑制 earthkit 退出时的临时文件清理权限错误"""
     original_atexit_register = atexit.register
@@ -41,10 +40,25 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                               raw_input_dir='Input/AIFS_raw',
                               output_dir='Output/AIFS',
                               image_dir='Run-output-png/AIFS',
-                              fields_to_draw=None,
                               data_source='ECMWF'):
     """
     执行完整的 AIFS 天气预报工作流
+    
+    参数:
+        init_datetime_str: 初始化时间字符串,格式 'YYYYMMDDHH',None则自动获取最新
+        lead_time: 预报时效(小时)
+        device: 计算设备,'cuda' 或 'cpu'
+        draw_results: 是否绘制结果图
+        skip_existing: 是否跳过已存在的文件
+        model_path: 模型权重路径
+        input_dir: 处理后输入数据目录
+        raw_input_dir: 原始输入数据目录
+        output_dir: 预报输出目录
+        image_dir: 图像输出目录
+        data_source: 数据源,'ECMWF'(最新数据)或 'ERA5'(历史数据)
+        
+    返回:
+        dict: 工作流执行结果
     """
     
     # 自动定位项目根目录
@@ -60,7 +74,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
             
     print(f"[INFO] Project root detected as: {project_root}")
 
-    # Convert relative paths to absolute paths based on project root
+    # 将相对路径转换为绝对路径
     if not os.path.isabs(input_dir):
         input_dir = os.path.normpath(os.path.join(project_root, input_dir))
     if not os.path.isabs(raw_input_dir):
@@ -69,24 +83,6 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         output_dir = os.path.normpath(os.path.join(project_root, output_dir))
     if not os.path.isabs(image_dir):
         image_dir = os.path.normpath(os.path.join(project_root, image_dir))
-        data_source: 数据源，'ECMWF'（最新数据）或 'ERA5'（历史数据）
-        
-    返回:
-        dict: 工作流执行结果
-    """
-    
-    # 获取脚本所在目录，用于转换相对路径
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 将相对路径转换为绝对路径
-    if not os.path.isabs(input_dir):
-        input_dir = os.path.normpath(os.path.join(script_dir, input_dir))
-    if not os.path.isabs(raw_input_dir):
-        raw_input_dir = os.path.normpath(os.path.join(script_dir, raw_input_dir))
-    if not os.path.isabs(output_dir):
-        output_dir = os.path.normpath(os.path.join(script_dir, output_dir))
-    if not os.path.isabs(image_dir):
-        image_dir = os.path.normpath(os.path.join(script_dir, image_dir))
     
     print(f"[INFO] Using paths:")
     print(f"  Raw Input:       {raw_input_dir}")
@@ -167,8 +163,6 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         if draw_results:
             print(f"\n[INFO] Plotting initial conditions...")
             try:
-                from draw_aifs_results import AIFSResultDrawer, draw_aifs_results
-                
                 # 创建初始状态用于绘图
                 init_state = input_state.copy()
                 init_state['init_date'] = input_state['date']
@@ -177,8 +171,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                 image_files = draw_aifs_results(
                     init_state,
                     init_datetime_str=init_datetime_str,
-                    fields_to_draw=fields_to_draw,
-                    draw_wind=True
+                    data_source=data_source
                 )
                 
                 results['image_files'].extend(image_files)
@@ -234,12 +227,11 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         
         if not output_files:
             print("[WARN] No new forecast outputs were generated (all existing)")
-            # 仍继续进行可视化
         else:
             print(f"[OK] Forecast execution completed successfully")
             print(f"  Generated outputs: {len(output_files)}")
         
-        # 为了绘图，我们需要重新运行获取所有预报状态
+        # 为了绘图,我们需要重新运行获取所有预报状态
         print(f"[INFO] Retrieving forecast states for visualization...")
         for state in runner.runner.run(input_state=input_state, lead_time=lead_time):
             forecast_states.append(state)
@@ -252,7 +244,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         traceback.print_exc()
         results['status'] = 'failed'
         results['errors'].append(f'Model execution error: {e}')
-        # 继续进行可视化（如果已有输出）
+        # 继续进行可视化(如果已有输出)
         if not output_files:
             return results
     
@@ -267,13 +259,6 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         try:
             print(f"[INFO] Drawing forecast results...")
             
-            # 创建绘图器
-            drawer = AIFSResultDrawer(output_dir=image_dir)
-            
-            # 默认绘制的字段（仅风场）
-            if fields_to_draw is None:
-                fields_to_draw = None  # draw_aifs_results 会自动绘制风场
-            
             total_images = 0
             
             # 为每个预报时次绘图
@@ -286,8 +271,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                 image_files = draw_aifs_results(
                     state,
                     init_datetime_str=init_datetime_str,
-                    fields_to_draw=fields_to_draw,
-                    draw_wind=True
+                    data_source=data_source
                 )
                 
                 results['image_files'].extend(image_files)
@@ -301,7 +285,6 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
             import traceback
             traceback.print_exc()
             results['errors'].append(f'Visualization error: {e}')
-            # 不返回，继续完成工作流
     
     # =====================================================================
     # 完成
@@ -334,131 +317,21 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
     return results
 
 
-def main():
-    """命令行主函数"""
-    parser = argparse.ArgumentParser(
-        description='AIFS Weather Forecast Complete Workflow',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Use latest ECMWF Open Data (default)
-  python main_aifs_workflow.py
-  
-  # Specify initialization time with ECMWF
-  python main_aifs_workflow.py --datetime 2025121200
-  
-  # Use ERA5 reanalysis data (requires datetime)
-  python main_aifs_workflow.py --datetime 2024120100 --data-source ERA5
-  
-  # Use CPU instead of GPU
-  python main_aifs_workflow.py --device cpu
-  
-  # Specify lead time and customize output fields
-  python main_aifs_workflow.py --lead-time 24 --fields 2t 100u msl gh_500
-        """
-    )
-    
-    parser.add_argument(
-        '--datetime',
-        type=str,
-        default=None,
-        help="Initialization datetime in format 'YYYYMMDDHH' (default: use latest available)"
-    )
-    
-    parser.add_argument(
-        '--lead-time',
-        type=int,
-        default=12,
-        help="Forecast lead time in hours (default: 12)"
-    )
-    
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cuda',
-        choices=['cuda', 'cpu'],
-        help="Computing device (default: cuda)"
-    )
-    
-    parser.add_argument(
-        '--model-path',
-        type=str,
-        default=None,
-        help="Path to local AIFS model checkpoint (default: Models-weights/AIFS/aifs-single-mse-1.0.ckpt or Hugging Face)"
-    )
-    
-    parser.add_argument(
-        '--skip-existing',
-        type=bool,
-        default=True,
-        help="Skip existing data and outputs (default: True)"
-    )
-    
-    parser.add_argument(
-        '--no-draw',
-        action='store_true',
-        help="Skip visualization step"
-    )
-    
-    parser.add_argument(
-        '--fields',
-        type=str,
-        nargs='+',
-        default=None,
-        help="Fields to visualize (default: 2t 100u msl)"
-    )
-    
-    parser.add_argument(
-        '--data-source',
-        type=str,
-        default='ECMWF',
-        choices=['ECMWF', 'ERA5'],
-        help="Data source: ECMWF Open Data (latest) or ERA5 (historical, requires --datetime)"
-    )
-    
-    args = parser.parse_args()
-    
-    # 执行工作流
-    results = run_complete_aifs_workflow(
-        init_datetime_str=args.datetime,
-        lead_time=args.lead_time,
-        device=args.device,
-        model_path=args.model_path,
-        draw_results=not args.no_draw,
-        skip_existing=args.skip_existing,
-        fields_to_draw=args.fields,
-        data_source=args.data_source
-    )
-    
-    # 根据结果返回退出码
-    sys.exit(0 if results['status'] == 'completed' else 1)
-
-
 if __name__ == '__main__':
-    # 运行时携带命令行参数则使用CLI模式
-    if len(sys.argv) > 1:
-        main()
-    else:
-        # 直接使用预设参数运行（无需命令行参数）
-        print("[INFO] Running with preset parameters")
-        print("[INFO] Use --help to see available options\n")
-        
-        # ===== 在这里预设参数 =====
-        init_datetime = '2025121400'          # 起报时间，None 则自动获取最新
-        lead_time = 6                        # 预报时效（小时），整6小时
-        device = 'cuda'                       # 计算设备：'cuda' 或 'cpu'
-        data_source = 'ECMWF'                 # 数据源：'ECMWF' 或 'ERA5'
-        draw_results = True                   # 是否绘制结果
-        skip_existing = True                  # 是否跳过已存在文件
-        fields_to_draw = None                 # 默认仅绘制风场
-        # ===== 参数预设完毕 =====
-        
-        results = run_complete_aifs_workflow(
-            init_datetime_str=init_datetime,
-            lead_time=lead_time,
-            device=device,
-            draw_results=draw_results,
-            skip_existing=skip_existing,
-            fields_to_draw=fields_to_draw,
-            data_source=data_source
-        )
+    # ===== 在这里设置运行参数 =====
+    init_datetime = '2025121500'          # 起报时间,None 则自动获取最新
+    lead_time = 6                         # 预报时效(小时),整6小时
+    device = 'cuda'                       # 计算设备:'cuda' 或 'cpu'
+    data_source = 'ECMWF'                 # 数据源:'ECMWF' 或 'ERA5'
+    draw_results = True                   # 是否绘制结果
+    skip_existing = True                  # 是否跳过已存在文件
+    # ===== 参数设置完毕 =====
+    
+    results = run_complete_aifs_workflow(
+        init_datetime_str=init_datetime,
+        lead_time=lead_time,
+        device=device,
+        draw_results=draw_results,
+        skip_existing=skip_existing,
+        data_source=data_source
+    )

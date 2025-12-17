@@ -65,114 +65,10 @@ class AIFSResultDrawer:
         """
         return np.where(lons > 180, lons - 360, lons)
     
-    def draw_field_contourf(self, state, field_name, init_datetime_str=None, 
-                           lon_range=None, lat_range=None, cmap='RdBu_r', 
-                           levels=20, data_source='AIFS'):
-        """
-        绘制单个气象字段的填色等高线图（使用三角剖分）
-        
-        参数:
-            state: 预报状态字典（包含 date, latitudes, longitudes, fields）
-            field_name: 字段名称
-            init_datetime_str: 起报时间字符串 'YYYYMMDDHH'
-            lon_range: 经度范围 [lon_min, lon_max]，默认全球
-            lat_range: 纬度范围 [lat_min, lat_max]，默认全球
-            cmap: 颜色映射表
-            levels: 等高线级数
-            data_source: 数据源标记
-            
-        返回:
-            str: 输出图片文件完整路径，或 None 如果绘制失败
-        """
-        try:
-            if field_name not in state.get('fields', {}):
-                print(f"[ERROR] Field '{field_name}' not found in state")
-                return None
-            
-            latitudes = state['latitudes']
-            longitudes = state['longitudes']
-            values = state['fields'][field_name]
-            
-            # 确定预报时效
-            forecast_hour = int((state['date'] - state.get('init_date', state['date'])).total_seconds() / 3600)
-            
-            # 构建图像
-            fig, ax = plt.subplots(
-                figsize=self.figsize,
-                subplot_kw={"projection": ccrs.PlateCarree()}
-            )
-            
-            # 地理要素
-            ax.coastlines(linewidth=0.5)
-            ax.add_feature(cfeature.BORDERS, linestyle=":", linewidth=0.5)
-            ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.3)
-            
-            # 值域处理
-            vmin = np.percentile(values[~np.isnan(values)], 2) if not np.all(np.isnan(values)) else 0
-            vmax = np.percentile(values[~np.isnan(values)], 98) if not np.all(np.isnan(values)) else 1
-            
-            # 使用三角剖分绘制数据
-            try:
-                triangulation = tri.Triangulation(
-                    self.fix_longitudes(longitudes),
-                    latitudes
-                )
-                
-                contourf = ax.tricontourf(
-                    triangulation, values,
-                    levels=levels,
-                    cmap=cmap,
-                    transform=ccrs.PlateCarree(),
-                    vmin=vmin, vmax=vmax
-                )
-            except Exception as e:
-                print(f"[WARN] Triangulation failed, using regular grid: {e}")
-                # 降级方案：直接绘制
-                contourf = ax.contourf(
-                    self.fix_longitudes(longitudes).reshape(-1),
-                    latitudes.reshape(-1),
-                    values.reshape(-1),
-                    levels=levels,
-                    cmap=cmap,
-                    transform=ccrs.PlateCarree()
-                )
-            
-            # 色条
-            cbar = fig.colorbar(contourf, ax=ax, orientation="vertical", shrink=0.7, label=field_name)
-            
-            # 标题
-            if init_datetime_str:
-                title = f'AIFS {field_name} at {init_datetime_str} +{forecast_hour:03d}h'
-            else:
-                title = f'AIFS {field_name} at {state["date"].strftime("%Y-%m-%d %H:%M UTC")} ({forecast_hour:03d}h lead time)'
-            
-            ax.set_title(title, loc='left', fontsize=12)
-            ax.set_title(f'Data source: {data_source}', loc='right', fontsize=10)
-            
-            # 保存图片到数据源对应的子文件夹
-            safe_field_name = field_name.replace('/', '_').replace('\\', '_')
-            if init_datetime_str:
-                filename = f'aifs_{safe_field_name}_{init_datetime_str}+{forecast_hour:03d}h.png'
-            else:
-                filename = f'aifs_{safe_field_name}_{state["date"].strftime("%Y%m%d%H")}+{forecast_hour:03d}h.png'
-            
-            filepath = self._get_output_path(filename, data_source)
-            plt.savefig(filepath, dpi=200, bbox_inches='tight')
-            plt.close()
-            
-            print(f"[OK] Saved: {filename}")
-            return filepath
-            
-        except Exception as e:
-            print(f"[ERROR] Failed to draw field {field_name}: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
     def draw_mslp_and_wind(self, state, init_datetime_str=None, 
                           lon_range=None, lat_range=None, data_source='AIFS'):
         """
-        绘制海平面气压(MSL)等压线与10m风场（和Pangu一样）
+        绘制海平面气压(MSL)等压线与10m风场
         
         参数:
             state: 预报状态字典
@@ -203,7 +99,7 @@ class AIFSResultDrawer:
             # 确定预报时效
             forecast_hour = int((state['date'] - state.get('init_date', state['date'])).total_seconds() / 3600)
             
-            # 若未指定范围，使用东亚默认范围（同Pangu）
+            # 若未指定范围，使用东亚默认范围
             if lon_range is None or lat_range is None:
                 lon_range = [95, 150]
                 lat_range = [5, 35]
@@ -226,7 +122,7 @@ class AIFSResultDrawer:
             fig = plt.figure(figsize=(15, 12))
             ax = plt.axes(projection=ccrs.PlateCarree())
             
-            # 自定义风速分级及颜色（和Pangu一样）
+            # 自定义风速分级及颜色
             wind_speed_color_map = {
                 0: '#FFFFFFFF', 5: '#D1D1D1FF', 10: '#188FD8FF', 15: '#34D259FF',
                 20: '#F1B04DFF', 25: '#FF6200FF', 30: '#FF0000FF', 35: '#9C2EBAFF',
@@ -291,7 +187,7 @@ class AIFSResultDrawer:
             
             # 保存图片
             filename = f'aifs_mslp_wind_{init_datetime_str}+{forecast_hour:03d}h_{data_source}.png'
-            filepath = os.path.join(self.output_dir, filename)
+            filepath = self._get_output_path(filename, data_source)
             plt.savefig(filepath, dpi=300, bbox_inches='tight')
             plt.close()
             
@@ -305,17 +201,14 @@ class AIFSResultDrawer:
             return None
 
 
-def draw_aifs_results(state, init_datetime_str=None, data_source='AIFS',
-                     fields_to_draw=None, draw_wind=True):
+def draw_aifs_results(state, init_datetime_str=None, data_source='AIFS'):
     """
-    顶层接口：读取 AIFS 预报状态，并绘制MSLP+10m风场图（和Pangu一样）
+    顶层接口：读取 AIFS 预报状态，并绘制MSLP+10m风场图
     
     参数:
         state: AIFS 预报状态字典
         init_datetime_str: 起报时间 'YYYYMMDDHH'
         data_source: 数据源名称
-        fields_to_draw: 保留以兼容（不使用）
-        draw_wind: 保留以兼容（不使用）
         
     返回:
         list[str]: 生成的图片文件路径列表
@@ -324,7 +217,7 @@ def draw_aifs_results(state, init_datetime_str=None, data_source='AIFS',
     
     image_files = []
     
-    # 绘制MSLP + 10m风场（和Pangu一样）
+    # 绘制MSLP + 10m风场
     filepath = drawer.draw_mslp_and_wind(
         state,
         init_datetime_str=init_datetime_str,

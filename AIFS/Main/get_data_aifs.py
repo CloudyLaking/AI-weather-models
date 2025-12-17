@@ -160,7 +160,7 @@ class AIFSDataDownloader:
             print(f"[ERROR] Failed to get latest date: {e}")
             return None
     
-    def get_open_data(self, param, date, levelist=None):
+    def get_open_data(self, param, date, levelist=None, save_raw=True, raw_file_prefix=None):
         """
         从 ECMWF Open Data 获取数据并插值到 N320 分辨率
         
@@ -168,6 +168,8 @@ class AIFSDataDownloader:
             param: 参数列表
             date: 日期
             levelist: 气压层列表（对于气压层参数）
+            save_raw: 是否保存原始 GRIB 文件
+            raw_file_prefix: 原始文件前缀（用于区分 surface/soil/pressure）
             
         返回:
             dict: 参数名称 -> 数据数组的字典
@@ -188,6 +190,20 @@ class AIFSDataDownloader:
                         param=param,
                         levelist=levelist
                     )
+                    
+                    # 保存原始 GRIB 文件
+                    if save_raw and raw_file_prefix:
+                        date_str = current_date.strftime('%Y%m%d%H')
+                        raw_filename = f"{raw_file_prefix}_{date_str}.grib2"
+                        raw_filepath = os.path.join(self.raw_input_dir, raw_filename)
+                        
+                        if not os.path.exists(raw_filepath):
+                            try:
+                                data.save(raw_filepath)
+                                print(f"  [SAVE] Raw GRIB saved: {raw_filename}")
+                            except Exception as e:
+                                print(f"  [WARN] Failed to save raw GRIB: {e}")
+                    
                 except Exception as e:
                     print(f"  [WARN] Failed to retrieve data for {current_date}: {e}")
                     continue
@@ -497,7 +513,11 @@ class AIFSDataDownloader:
             
             # 第1步：获取地面参数
             print(f"\n[STEP 1/3] Retrieving surface parameters...")
-            sfc_fields = self.get_open_data(self.PARAM_SFC, date)
+            sfc_fields = self.get_open_data(
+                self.PARAM_SFC, date, 
+                save_raw=True, 
+                raw_file_prefix='ecmwf_surface'
+            )
             fields.update(sfc_fields)
             print(f"  [OK] Retrieved {len(sfc_fields)} surface parameters")
             for name, data in sfc_fields.items():
@@ -506,7 +526,12 @@ class AIFSDataDownloader:
             
             # 第2步：获取土壤参数
             print(f"\n[STEP 2/3] Retrieving soil parameters...")
-            soil_fields = self.get_open_data(self.PARAM_SOIL, date, levelist=self.SOIL_LEVELS)
+            soil_fields = self.get_open_data(
+                self.PARAM_SOIL, date, 
+                levelist=self.SOIL_LEVELS,
+                save_raw=True,
+                raw_file_prefix='ecmwf_soil'
+            )
             
             # 重映射土壤参数名称
             for old_name, new_name in self.SOIL_MAPPING.items():
@@ -519,7 +544,12 @@ class AIFSDataDownloader:
             
             # 第3步：获取气压层参数
             print(f"\n[STEP 3/3] Retrieving pressure level parameters...")
-            pl_fields = self.get_open_data(self.PARAM_PL, date, levelist=self.LEVELS)
+            pl_fields = self.get_open_data(
+                self.PARAM_PL, date, 
+                levelist=self.LEVELS,
+                save_raw=True,
+                raw_file_prefix='ecmwf_pressure'
+            )
             
             # 地位势高度 (GH) 转换为地位势 (Z)
             # GH 单位为 m²/s²，Z = GH * 9.80665
