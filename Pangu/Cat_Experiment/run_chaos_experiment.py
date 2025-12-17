@@ -8,12 +8,7 @@ import onnxruntime as ort
 from datetime import datetime
 
 # 添加 Main 目录到路径以导入绘图模块
-sys.path.append(os.path.normpath(os.path.join(os.path.dirname(__file__), '../Main')))
-try:
-    from draw_pangu_results import PanguResultDrawer
-except ImportError:
-    print("[WARN] Could not import PanguResultDrawer, visualization will be disabled")
-    PanguResultDrawer = None
+from draw_pangu_results import PanguResultDrawer
 
 class PanguChaosRunner:
     """Pangu 混沌实验运行程序"""
@@ -117,15 +112,8 @@ class PanguChaosRunner:
         Returns:
             bool: 是否保存
         """
-        if step < 100:
-            # 0-100步：全部保存
-            return True
-        elif step < 1000:
-            # 100-1000步：每100步保存一次
-            return (step - 100) % 100 == 0
-        else:
-            # 1000步后：每1000步保存一次
-            return (step - 1000) % 1000 == 0
+        # 100步后，每10步保存一次
+        return step % 10 == 0 and step >= 100
     
     def load_input_data(self):
         """加载输入数据"""
