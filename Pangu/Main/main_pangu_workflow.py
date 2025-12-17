@@ -39,48 +39,40 @@ except ImportError as e:
 def run_complete_workflow(data_source='GFS', init_datetime_str=None, model_type=24, 
                          run_times=8, lon_range=None, lat_range=None,
                          draw_results=True, skip_existing=True,
-                         input_dir='../../../Input/Pangu',
-                         raw_input_dir='../../../Input/Pangu_raw',
-                         output_dir='../../../Output/Pangu',
-                         model_dir='../../../Models-weights/Pangu',
-                         image_dir='../../../Run-output-png/Pangu'):
+                         input_dir='Input/Pangu',
+                         raw_input_dir='Input/Pangu_raw',
+                         output_dir='Output/Pangu',
+                         model_dir='Models-weights/Pangu',
+                         image_dir='Run-output-png/Pangu'):
     """
     Execute complete Pangu weather forecast workflow
-    
-    Args:
-        data_source: Data source - 'GFS', 'ERA5', or 'ECMWF'
-        init_datetime_str: Initialization datetime in format 'YYYYMMDDHH'
-                          If None, use current time
-        model_type: Model type - 6 for 6h, 24 for 24h forecast
-        run_times: Number of forecast rounds
-        lon_range: Geographic longitude range [lon_min, lon_max]
-        lat_range: Geographic latitude range [lat_min, lat_max]
-        draw_results: Whether to draw visualization results
-        skip_existing: Whether to skip existing data and outputs
-        input_dir: Processed input data directory (NPY files)
-        raw_input_dir: Raw input data directory (NC/GRIB files)
-        output_dir: Output data directory (model predictions)
-        model_dir: Model weights directory
-        image_dir: Visualization output directory
-        
-    Returns:
-        dict: Workflow execution results
     """
     
-    # Get the script's directory and convert relative paths based on it
-    script_dir = os.path.dirname(os.path.abspath(__file__))  # AI-weather-models/Pangu/Main/
-    
-    # Convert relative paths to absolute paths based on script location
+    # 自动定位项目根目录
+    project_root = os.getcwd()
+    # 如果当前目录下没有 Input，尝试向上查找
+    if not os.path.exists(os.path.join(project_root, 'Input')):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        current = script_dir
+        for _ in range(4):
+            if os.path.exists(os.path.join(current, 'Input')):
+                project_root = current
+                break
+            current = os.path.dirname(current)
+            
+    print(f"[INFO] Project root detected as: {project_root}")
+
+    # Convert relative paths to absolute paths based on project root
     if not os.path.isabs(input_dir):
-        input_dir = os.path.normpath(os.path.join(script_dir, input_dir))
+        input_dir = os.path.normpath(os.path.join(project_root, input_dir))
     if not os.path.isabs(raw_input_dir):
-        raw_input_dir = os.path.normpath(os.path.join(script_dir, raw_input_dir))
+        raw_input_dir = os.path.normpath(os.path.join(project_root, raw_input_dir))
     if not os.path.isabs(output_dir):
-        output_dir = os.path.normpath(os.path.join(script_dir, output_dir))
+        output_dir = os.path.normpath(os.path.join(project_root, output_dir))
     if not os.path.isabs(model_dir):
-        model_dir = os.path.normpath(os.path.join(script_dir, model_dir))
+        model_dir = os.path.normpath(os.path.join(project_root, model_dir))
     if not os.path.isabs(image_dir):
-        image_dir = os.path.normpath(os.path.join(script_dir, image_dir))
+        image_dir = os.path.normpath(os.path.join(project_root, image_dir))
     
     print(f"[INFO] Using paths:")
     print(f"  Raw Input:      {raw_input_dir}")

@@ -20,7 +20,7 @@ warnings.filterwarnings('ignore')
 class AIFSResultDrawer:
     """AIFS 天气预报结果绘图类"""
     
-    def __init__(self, output_dir='../../../Run-output-png/AIFS', figsize=(14, 10)):
+    def __init__(self, output_dir='Run-output-png/AIFS', figsize=(14, 10)):
         """
         初始化绘图器
         

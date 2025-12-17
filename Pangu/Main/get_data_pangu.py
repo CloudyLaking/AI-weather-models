@@ -58,7 +58,7 @@ class DataDownloader:
             for i, var_name in enumerate(var_names):
                 print(f"  ✓ {var_name}: min={upper_data[i].min():.2f}, max={upper_data[i].max():.2f}")
     
-    def __init__(self, output_dir='../../../Output/pangu', input_dir='../../../Input/pangu', raw_input_dir='../../../Input/Pangu_raw'):
+    def __init__(self, output_dir='Input/pangu', input_dir='Input/pangu', raw_input_dir='Input/Pangu_raw'):
         """
         Initialize data downloader
         

@@ -37,27 +37,38 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                               device='cuda', draw_results=True,
                               skip_existing=True,
                               model_path=None,
-                              input_dir='../../../Input/AIFS',
-                              raw_input_dir='../../../Input/AIFS_raw',
-                              output_dir='../../../Output/AIFS',
-                              image_dir='../../../Run-output-png/AIFS',
+                              input_dir='Input/AIFS',
+                              raw_input_dir='Input/AIFS_raw',
+                              output_dir='Output/AIFS',
+                              image_dir='Run-output-png/AIFS',
                               fields_to_draw=None,
                               data_source='ECMWF'):
     """
     执行完整的 AIFS 天气预报工作流
+    """
     
-    参数:
-        init_datetime_str: 起报时间，格式 'YYYYMMDDHH'，为 None 则使用最新数据
-        lead_time: 预报时效（小时）
-        device: 计算设备 'cuda' 或 'cpu'
-        draw_results: 是否绘制可视化结果
-        skip_existing: 是否跳过已存在的数据和输出
-        model_path: 本地模型文件路径（为 None 则使用默认或 Hugging Face）
-        input_dir: 处理后输入数据目录
-        raw_input_dir: 原始输入数据目录
-        output_dir: 预报输出数据目录
-        image_dir: 图片输出目录
-        fields_to_draw: 要绘制的字段列表，为 None 则使用默认值
+    # 自动定位项目根目录
+    project_root = os.getcwd()
+    if not os.path.exists(os.path.join(project_root, 'Input')):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        current = script_dir
+        for _ in range(4):
+            if os.path.exists(os.path.join(current, 'Input')):
+                project_root = current
+                break
+            current = os.path.dirname(current)
+            
+    print(f"[INFO] Project root detected as: {project_root}")
+
+    # Convert relative paths to absolute paths based on project root
+    if not os.path.isabs(input_dir):
+        input_dir = os.path.normpath(os.path.join(project_root, input_dir))
+    if not os.path.isabs(raw_input_dir):
+        raw_input_dir = os.path.normpath(os.path.join(project_root, raw_input_dir))
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.normpath(os.path.join(project_root, output_dir))
+    if not os.path.isabs(image_dir):
+        image_dir = os.path.normpath(os.path.join(project_root, image_dir))
         data_source: 数据源，'ECMWF'（最新数据）或 'ERA5'（历史数据）
         
     返回:

@@ -11,8 +11,8 @@ import sys
 class PanguRunner:
     """Pangu weather forecast model runner"""
     
-    def __init__(self, model_type=24, input_dir='../../../Input/pangu', 
-                 output_dir='../../../Output/pangu', model_dir='../../../Models-weights/Pangu'):
+    def __init__(self, model_type=24, input_dir='Input/pangu', 
+                 output_dir='Output/pangu', model_dir='Models-weights/Pangu'):
         """
         Initialize Pangu runner
         

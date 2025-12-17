@@ -107,8 +107,8 @@ class AIFSDataDownloader:
         except Exception as e:
             pass  # 如果出错就不打印，不影响程序运行
     
-    def __init__(self, input_dir='../../../Input/AIFS', 
-                 raw_input_dir='../../../Input/AIFS_raw'):
+    def __init__(self, input_dir='Input/AIFS', 
+                 raw_input_dir='Input/AIFS_raw'):
         """
         初始化数据下载器
         

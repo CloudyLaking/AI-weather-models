@@ -20,10 +20,10 @@ class AIFSRunner:
     # AIFS 模型检查点（从 Hugging Face，作为备选）
     CHECKPOINT_HF = {"huggingface": "ecmwf/aifs-single-1.0"}
     # 本地模型默认路径
-    DEFAULT_LOCAL_MODEL = "../../../Models-weights/AIFS/aifs-single-mse-1.0.ckpt"
+    DEFAULT_LOCAL_MODEL = "Models-weights/AIFS/aifs-single-mse-1.0.ckpt"
     
     def __init__(self, device='cuda', num_chunks=None, 
-                 model_path=None, output_dir='../../../Output/AIFS'):
+                 model_path=None, output_dir='Output/AIFS'):
         """
         初始化 AIFS 执行器
         

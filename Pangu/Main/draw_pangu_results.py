@@ -16,7 +16,7 @@ import sys
 class PanguResultDrawer:
     """Pangu 天气预报结果绘图类"""
 
-    def __init__(self, output_dir='../../../Run-output-png/Pangu', figsize=(16, 10)):
+    def __init__(self, output_dir='Run-output-png/Pangu', figsize=(16, 10)):
         """
         初始化绘图器
 
@@ -245,9 +245,20 @@ if __name__ == '__main__':
     # =============================================
 
     # 根据预报参数构造 Pangu 输出文件路径
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # 假设从项目根目录运行，或者 Output 目录在项目根目录
+    # 尝试定位项目根目录
+    project_root = os.getcwd()
+    if not os.path.exists(os.path.join(project_root, 'Output')):
+        # 尝试向上查找
+        current = script_dir
+        for _ in range(4):
+            if os.path.exists(os.path.join(current, 'Output')):
+                project_root = current
+                break
+            current = os.path.dirname(current)
+            
     filename = f'output_surface_{init_datetime_str}+{forecast_hour:03d}h_{data_source}.npy'
-    output_path = os.path.join(script_dir, '../../../Output/Pangu/', filename)
+    output_path = os.path.join(project_root, 'Output/Pangu/', filename)
     output_path = os.path.normpath(output_path)
 
     if os.path.exists(output_path):

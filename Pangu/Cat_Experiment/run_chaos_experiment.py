@@ -18,23 +18,42 @@ except ImportError:
 class PanguChaosRunner:
     """Pangu 混沌实验运行程序"""
     
-    def __init__(self, input_dir='../../../Input/Pangu/Cat_Experiment',
-                 output_dir='../../../Output/Pangu/Cat_Experiment',
-                 image_dir='../../../Run-output-png/Pangu/Cat_Experiment',
-                 model_dir='../../../Models-weights/Pangu'):
-        """初始化"""
-        self.input_dir = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), input_dir
-        ))
-        self.output_dir = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), output_dir
-        ))
-        self.image_dir = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), image_dir
-        ))
-        self.model_dir = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), model_dir
-        ))
+    def __init__(self, 
+                 input_dir='Input/Pangu/Cat_Experiment',
+                 output_dir='Output/Pangu/Cat_Experiment',
+                 image_dir='Run-output-png/Pangu/Cat_Experiment',
+                 model_dir='Models-weights/Pangu'):
+        """
+        初始化
+        注意：默认路径假设当前工作目录为项目根目录。
+        如果不是，程序会尝试自动寻找项目根目录。
+        """
+        # 尝试定位项目根目录 (包含 Input 文件夹的目录)
+        project_root = os.getcwd()
+        # 如果当前目录下没有 Input，尝试向上查找
+        if not os.path.exists(os.path.join(project_root, 'Input')):
+            # 尝试基于脚本位置查找
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            current = script_dir
+            for _ in range(4):
+                if os.path.exists(os.path.join(current, 'Input')):
+                    project_root = current
+                    break
+                current = os.path.dirname(current)
+        
+        print(f"[INFO] Project root detected as: {project_root}")
+        
+        # 转换路径为绝对路径
+        self.input_dir = os.path.join(project_root, input_dir)
+        self.output_dir = os.path.join(project_root, output_dir)
+        self.image_dir = os.path.join(project_root, image_dir)
+        self.model_dir = os.path.join(project_root, model_dir)
+        
+        print(f"[INFO] Paths configured:")
+        print(f"  Input:  {self.input_dir}")
+        print(f"  Output: {self.output_dir}")
+        print(f"  Images: {self.image_dir}")
+        print(f"  Model:  {self.model_dir}")
         
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.image_dir, exist_ok=True)

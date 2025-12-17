@@ -115,16 +115,28 @@ def load_and_convert_image(image_path, target_shape=(721, 1440)):
 def main():
     """主程序"""
     
-    # 文件路径
-    image_path = os.path.join(
-        os.path.dirname(__file__), 
-        '04afd9a6bf31bb26af577106b6fefb0f.jpg'
-    )
+    # 获取当前脚本所在目录的绝对路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
     
-    output_dir = os.path.normpath(os.path.join(
-        os.path.dirname(__file__),
-        '../../../Input/Pangu/Cat_Experiment'
-    ))
+    image_path = os.path.join(script_dir, '04afd9a6bf31bb26af577106b6fefb0f.jpg')
+    
+    # 尝试定位项目根目录
+    current_path = script_dir
+    project_root = None
+    for _ in range(4): # 向上查找几层
+        if os.path.exists(os.path.join(current_path, 'Input')):
+            project_root = current_path
+            break
+        current_path = os.path.dirname(current_path)
+    
+    if project_root:
+        output_dir = os.path.join(project_root, 'Input', 'Pangu', 'Cat_Experiment')
+    else:
+        # 如果找不到，回退到用户建议的相对路径（假设在根目录运行）
+        output_dir = 'Input/Pangu/Cat_Experiment'
+        
+    print(f"[INFO] Output directory: {output_dir}")
     
     print("\n" + "="*70)
     print("IMAGE TO INITIAL FIELD CONVERSION")
