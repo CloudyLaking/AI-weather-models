@@ -1,6 +1,17 @@
 # AI-weather-models\AIFS\Main\main_aifs_workflow.py
 # 整合工作流编排脚本 - 完整的数据获取、模型预报、绘图流程
 
+# Uncomment the lines below to install the required packages
+
+"""
+pip install  anemoi-inference[huggingface]==0.4.9 anemoi-models==0.3.1 torch==2.4.0
+pip install  earthkit-regrid==0.4.0 ecmwf-opendata 
+pip install  flash_attn
+pip install  cdsapi cartopy
+
+
+"""
+
 import os
 import sys
 from datetime import datetime, timedelta
@@ -40,7 +51,9 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                               raw_input_dir='Input/AIFS_raw',
                               output_dir='Output/AIFS',
                               image_dir='Run-output-png/AIFS',
-                              data_source='ECMWF'):
+                              data_source='ECMWF',
+                              use_gpu_interp=True,
+                              interp_res=0.5):
     """
     执行完整的 AIFS 天气预报工作流
     
@@ -56,6 +69,8 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         output_dir: 预报输出目录
         image_dir: 图像输出目录
         data_source: 数据源,'ECMWF'(最新数据)或 'ERA5'(历史数据)
+        use_gpu_interp: 是否使用GPU加速插值(推荐,比CPU三角剖分快60-120倍)
+        interp_res: 插值目标分辨率(度),0.5推荐,0.25更精细,1.0更快
         
     返回:
         dict: 工作流执行结果
@@ -163,21 +178,22 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         if draw_results:
             print(f"\n[INFO] Plotting initial conditions...")
             try:
-                # 创建初始状态用于绘图
                 init_state = input_state.copy()
                 init_state['init_date'] = input_state['date']
-                
-                # 绘制初始场
+
                 image_files = draw_aifs_results(
                     init_state,
                     init_datetime_str=init_datetime_str,
-                    data_source=data_source
+                    data_source=data_source,
+                    use_gpu_interp=use_gpu_interp,
+                    target_res=interp_res,
+                    device=device
                 )
-                
+
                 results['image_files'].extend(image_files)
                 if image_files:
                     print(f"  [OK] Initial conditions plotted: {len(image_files)} images")
-                
+
             except Exception as e:
                 print(f"  [WARN] Failed to plot initial conditions: {e}")
         
@@ -195,6 +211,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
     print("-"*70)
     
     forecast_states = []
+    output_files = []  # 初始化避免未绑定错误
     
     try:
         print(f"[INFO] Running AIFS forecast...")
@@ -271,7 +288,10 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                 image_files = draw_aifs_results(
                     state,
                     init_datetime_str=init_datetime_str,
-                    data_source=data_source
+                    data_source=data_source,
+                    use_gpu_interp=use_gpu_interp,
+                    target_res=interp_res,
+                    device=device
                 )
                 
                 results['image_files'].extend(image_files)
@@ -319,12 +339,14 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
 
 if __name__ == '__main__':
     # ===== 在这里设置运行参数 =====
-    init_datetime = '2025121500'          # 起报时间,None 则自动获取最新
+    init_datetime = '2025121700'          # 起报时间,None 则自动获取最新
     lead_time = 6                         # 预报时效(小时),整6小时
     device = 'cuda'                       # 计算设备:'cuda' 或 'cpu'
     data_source = 'ECMWF'                 # 数据源:'ECMWF' 或 'ERA5'
     draw_results = True                   # 是否绘制结果
     skip_existing = True                  # 是否跳过已存在文件
+    use_gpu_interp = False                # 使用三角剖分(False推荐,稳定准确)
+    interp_res = 0.5                      # 插值分辨率(度):仅use_gpu_interp=True时有效
     # ===== 参数设置完毕 =====
     
     results = run_complete_aifs_workflow(
@@ -333,5 +355,7 @@ if __name__ == '__main__':
         device=device,
         draw_results=draw_results,
         skip_existing=skip_existing,
-        data_source=data_source
+        data_source=data_source,
+        use_gpu_interp=use_gpu_interp,
+        interp_res=interp_res
     )

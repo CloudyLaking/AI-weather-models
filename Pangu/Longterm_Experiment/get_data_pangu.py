@@ -20,6 +20,14 @@ import os
 import numpy as np
 from datetime import datetime, timedelta
 
+try:
+    import earthkit.data as ekd
+    import earthkit.regrid as ekr
+except ImportError:
+    ekd = None
+    ekr = None
+
+
 class DataDownloader:
     """Unified data downloader and converter supporting ERA5, GFS, and EC data"""
     

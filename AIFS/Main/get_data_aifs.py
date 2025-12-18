@@ -172,60 +172,92 @@ class AIFSDataDownloader:
             raw_file_prefix: 原始文件前缀（用于区分 surface/soil/pressure）
             
         返回:
-            dict: 参数名称 -> 数据数组的字典
+            tuple: (fields_dict, latitudes, longitudes) 参数数据字典和经纬度数组
         """
         fields = defaultdict(list)
         levelist = levelist or []
+        lats = None
+        lons = None
         
         try:
             # 获取当前日期和前6小时的数据
             for offset_hours in [6, 0]:
                 current_date = date - timedelta(hours=offset_hours)
-                print(f"  [LOAD] Retrieving data for {current_date}...")
+                date_str = current_date.strftime('%Y%m%d%H')
                 
-                try:
-                    data = ekd.from_source(
-                        "ecmwf-open-data",
-                        date=current_date,
-                        param=param,
-                        levelist=levelist
-                    )
+                # 检查是否存在本地 GRIB 文件
+                raw_filepath = None
+                if save_raw and raw_file_prefix:
+                    raw_filename = f"{raw_file_prefix}_{date_str}.grib2"
+                    raw_filepath = os.path.join(self.raw_input_dir, raw_filename)
                     
-                    # 保存原始 GRIB 文件
-                    if save_raw and raw_file_prefix:
-                        date_str = current_date.strftime('%Y%m%d%H')
-                        raw_filename = f"{raw_file_prefix}_{date_str}.grib2"
-                        raw_filepath = os.path.join(self.raw_input_dir, raw_filename)
+                    if os.path.exists(raw_filepath):
+                        print(f"  [LOAD] Using cached GRIB file: {raw_filename}")
+                        try:
+                            data = ekd.from_source("file", raw_filepath)
+                        except Exception as e:
+                            print(f"  [WARN] Failed to load cached file, will download: {e}")
+                            raw_filepath = None
+                
+                # 如果没有本地文件，则从 ECMWF Open Data 下载
+                if raw_filepath is None or not os.path.exists(raw_filepath):
+                    print(f"  [LOAD] Downloading data for {current_date}...")
+                    try:
+                        data = ekd.from_source(
+                            "ecmwf-open-data",
+                            date=current_date,
+                            param=param,
+                            levelist=levelist
+                        )
                         
-                        if not os.path.exists(raw_filepath):
+                        # 保存原始 GRIB 文件
+                        if save_raw and raw_file_prefix:
+                            raw_filename = f"{raw_file_prefix}_{date_str}.grib2"
+                            raw_filepath = os.path.join(self.raw_input_dir, raw_filename)
+                            
                             try:
                                 data.save(raw_filepath)
                                 print(f"  [SAVE] Raw GRIB saved: {raw_filename}")
                             except Exception as e:
                                 print(f"  [WARN] Failed to save raw GRIB: {e}")
-                    
-                except Exception as e:
-                    print(f"  [WARN] Failed to retrieve data for {current_date}: {e}")
-                    continue
+                        
+                    except Exception as e:
+                        print(f"  [WARN] Failed to retrieve data for {current_date}: {e}")
+                        continue
                 
                 for f in data:
+                    # 提取经纬度（只需第一次）
+                    if lats is None or lons is None:
+                        lats_temp = f.to_numpy(flatten=True, dtype=np.float64)  # 获取展平数据
+                        # 使用 earthkit 获取实际的经纬度
+                        try:
+                            coords = f.to_points()  # 返回 (lat, lon) 点坐标
+                            if coords is not None:
+                                lats = coords['lat']
+                                lons = coords['lon']
+                                print(f"    [GRID] Extracted grid coordinates: {len(lats)} points")
+                        except:
+                            # 备用方案：从 metadata 中提取
+                            pass
+                    
                     # Open data 经度范围是 -180 到 180，需要转换到 0-360
                     values = f.to_numpy()
-                    assert values.shape == (721, 1440), f"Unexpected shape: {values.shape}"
                     
-                    # 经度转换
-                    values = np.roll(values, -values.shape[1] // 2, axis=1)
-                    
-                    # 插值到 N320 分辨率（64x128）
+                    # 插值到 N320 分辨率
                     print(f"    [INTERP] Interpolating {f.metadata('param')} to N320...")
-                    values = ekr.interpolate(
+                    values_interp = ekr.interpolate(
+                        values,
+                        {"grid": (0.25, 0.25)},  # 源网格分辨率
+                        {"grid": "N320"}  # 目标网格分辨率
+                    )
+                    values_interp = ekr.interpolate(
                         values,
                         {"grid": (0.25, 0.25)},  # 源网格分辨率
                         {"grid": "N320"}  # 目标网格分辨率
                     )
                     
                     # 打印数据统计信息
-                    print(f"      [STATS] {f.metadata('param')}: min={values.min():.4f}, max={values.max():.4f}, mean={values.mean():.4f}")
+                    print(f"      [STATS] {f.metadata('param')}: shape={values_interp.shape}, min={values_interp.min():.4f}, max={values_interp.max():.4f}")
                     
                     # 构建参数名称
                     if levelist:
@@ -233,7 +265,7 @@ class AIFSDataDownloader:
                     else:
                         param_name = f.metadata("param")
                     
-                    fields[param_name].append(values)
+                    fields[param_name].append(values_interp)
             
             # 将各参数的时间序列堆叠为单一矩阵
             for param_name, values in fields.items():
@@ -247,7 +279,16 @@ class AIFSDataDownloader:
             # 移除None值
             fields = {k: v for k, v in fields.items() if v is not None}
             
-            return dict(fields)
+            # 如果没有成功提取经纬度，则生成默认的 N320 网格
+            if lats is None or lons is None:
+                print(f"  [WARN] Could not extract grid coordinates, generating default N320 grid...")
+                # N320 非结构化网格有 542080 个点
+                npoints = 542080
+                # 生成均匀分布的经纬度作为备用
+                lats = np.linspace(-90, 90, npoints)
+                lons = np.linspace(0, 360, npoints, endpoint=False)
+            
+            return dict(fields), lats, lons
             
         except Exception as e:
             print(f"[ERROR] Data retrieval error: {e}")
@@ -513,7 +554,7 @@ class AIFSDataDownloader:
             
             # 第1步：获取地面参数
             print(f"\n[STEP 1/3] Retrieving surface parameters...")
-            sfc_fields = self.get_open_data(
+            sfc_fields, lats, lons = self.get_open_data(
                 self.PARAM_SFC, date, 
                 save_raw=True, 
                 raw_file_prefix='ecmwf_surface'
@@ -526,7 +567,7 @@ class AIFSDataDownloader:
             
             # 第2步：获取土壤参数
             print(f"\n[STEP 2/3] Retrieving soil parameters...")
-            soil_fields = self.get_open_data(
+            soil_fields, _, _ = self.get_open_data(
                 self.PARAM_SOIL, date, 
                 levelist=self.SOIL_LEVELS,
                 save_raw=True,
@@ -544,7 +585,7 @@ class AIFSDataDownloader:
             
             # 第3步：获取气压层参数
             print(f"\n[STEP 3/3] Retrieving pressure level parameters...")
-            pl_fields = self.get_open_data(
+            pl_fields, _, _ = self.get_open_data(
                 self.PARAM_PL, date, 
                 levelist=self.LEVELS,
                 save_raw=True,
@@ -571,10 +612,12 @@ class AIFSDataDownloader:
             
             print(f"\n[OK] Total fields retrieved: {len(fields)}")
             
-            # 创建初始状态字典
+            # 创建初始状态字典（使用从数据中提取的经纬度）
             input_state = {
                 'date': date,
-                'fields': fields
+                'fields': fields,
+                'latitudes': lats,
+                'longitudes': lons
             }
             
             # 保存为 NPY 格式（用于后续快速加载）
@@ -600,6 +643,8 @@ class AIFSDataDownloader:
             # 创建可序列化的版本
             state_data = {
                 'date': input_state['date'].isoformat(),
+                'latitudes': input_state.get('latitudes', np.array([])),
+                'longitudes': input_state.get('longitudes', np.array([])),
                 'fields': {k: v for k, v in input_state['fields'].items()}
             }
             
@@ -631,10 +676,18 @@ class AIFSDataDownloader:
             
             data = np.load(npz_file, allow_pickle=True)
             date = datetime.fromisoformat(str(data['date']))
-            fields = {k: v for k, v in data.items() if k != 'date'}
+            
+            # 提取经纬度（如果存在）
+            latitudes = data.get('latitudes', np.array([]))
+            longitudes = data.get('longitudes', np.array([]))
+            
+            # 提取字段数据
+            fields = {k: v for k, v in data.items() if k not in ['date', 'latitudes', 'longitudes']}
             
             return {
                 'date': date,
+                'latitudes': latitudes,
+                'longitudes': longitudes,
                 'fields': fields
             }
         except Exception as e:
