@@ -47,6 +47,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
                               device='cuda', draw_results=True,
                               skip_existing=True,
                               model_path=None,
+                              use_huggingface=False,
                               input_dir='Input/AIFS',
                               raw_input_dir='Input/AIFS_raw',
                               output_dir='Output/AIFS',
@@ -63,7 +64,8 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         device: 计算设备,'cuda' 或 'cpu'
         draw_results: 是否绘制结果图
         skip_existing: 是否跳过已存在的文件
-        model_path: 模型权重路径
+        model_path: 模型权重路径（为None则根据use_huggingface决定）
+        use_huggingface: 是否使用 Hugging Face 模型（False=本地，True=HF）
         input_dir: 处理后输入数据目录
         raw_input_dir: 原始输入数据目录
         output_dir: 预报输出目录
@@ -222,7 +224,8 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         runner = AIFSRunner(
             device=device,
             model_path=model_path,
-            output_dir=output_dir
+            output_dir=output_dir,
+            use_huggingface=use_huggingface
         )
         
         if runner.runner is None:
@@ -347,6 +350,10 @@ if __name__ == '__main__':
     skip_existing = True                  # 是否跳过已存在文件
     use_gpu_interp = False                # 使用三角剖分(False推荐,稳定准确)
     interp_res = 0.5                      # 插值分辨率(度):仅use_gpu_interp=True时有效
+    
+    # ===== 模型源选择参数 =====
+    use_huggingface = False               # False=使用本地模型, True=使用Hugging Face模型
+    model_path = None                     # 本地模型路径(None则使用默认路径或HF)
     # ===== 参数设置完毕 =====
     
     results = run_complete_aifs_workflow(
@@ -357,5 +364,7 @@ if __name__ == '__main__':
         skip_existing=skip_existing,
         data_source=data_source,
         use_gpu_interp=use_gpu_interp,
-        interp_res=interp_res
+        interp_res=interp_res,
+        use_huggingface=use_huggingface,
+        model_path=model_path
     )

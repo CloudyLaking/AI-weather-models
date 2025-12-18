@@ -18,20 +18,21 @@ class AIFSRunner:
     """AIFS 天气预报模型执行器"""
     
     # AIFS 模型检查点（从 Hugging Face，作为备选）
-    CHECKPOINT_HF = {"huggingface": "ecmwf/aifs-single-1.0"}
+    CHECKPOINT_HF = {"huggingface": "ecmwf/aifs-single-1.1"}
     # 本地模型默认路径
-    DEFAULT_LOCAL_MODEL = "Models-weights/AIFS/aifs-single-mse-1.0.ckpt"
+    DEFAULT_LOCAL_MODEL = "Models-weights/AIFS/aifs-single-mse-1.1.ckpt"
     
     def __init__(self, device='cuda', num_chunks=None, 
-                 model_path=None, output_dir='Output/AIFS'):
+                 model_path=None, output_dir='Output/AIFS', use_huggingface=False):
         """
         初始化 AIFS 执行器
         
         参数:
             device: 计算设备 'cuda' 或 'cpu'
             num_chunks: 模型映射器的分块数（降低内存占用）
-            model_path: 本地模型文件路径，为 None 则尝试使用默认本地路径或 Hugging Face
+            model_path: 本地模型文件路径，为 None 则根据 use_huggingface 参数决定
             output_dir: 输出数据目录
+            use_huggingface: 是否使用 Hugging Face 模型（False=使用本地模型，True=使用 HF）
         """
         # 自动定位项目根目录
         project_root = os.getcwd()
@@ -51,15 +52,25 @@ class AIFSRunner:
         self.output_dir = output_dir
         self.device = device
         self.num_chunks = num_chunks
+        self.use_huggingface = use_huggingface
         
-        # 确定模型路径
+        # 确定模型路径或使用 Hugging Face
         if model_path is None:
-            model_path = os.path.normpath(os.path.join(project_root, self.DEFAULT_LOCAL_MODEL))
-        elif not os.path.isabs(model_path):
-            model_path = os.path.normpath(os.path.join(project_root, model_path))
-        
-        self.model_path = model_path
-        self.use_local_model = os.path.exists(self.model_path)
+            if use_huggingface:
+                # 使用 Hugging Face 模型
+                self.model_path = None
+                self.use_local_model = False
+            else:
+                # 使用默认本地模型路径
+                model_path = os.path.normpath(os.path.join(project_root, self.DEFAULT_LOCAL_MODEL))
+                self.model_path = model_path
+                self.use_local_model = os.path.exists(self.model_path)
+        else:
+            # 用户指定了模型路径
+            if not os.path.isabs(model_path):
+                model_path = os.path.normpath(os.path.join(project_root, model_path))
+            self.model_path = model_path
+            self.use_local_model = os.path.exists(self.model_path)
         
         os.makedirs(self.output_dir, exist_ok=True)
         
@@ -71,25 +82,34 @@ class AIFSRunner:
         self.runner = self._init_runner()
     
     def _init_runner(self):
-        """初始化 AIFS SimpleRunner"""
+        """初始化 AIFS SimpleRunner（参考 main.py 的方法）"""
         print(f"[LOAD] Initializing AIFS SimpleRunner...")
         print(f"  Device: {self.device}")
         
         if self.num_chunks is not None:
             print(f"  Num chunks: {self.num_chunks}")
         
-        # 优先使用本地模型，否则从 Hugging Face 下载
+        # 根据 use_huggingface 参数和本地模型存在性决定使用哪个模型
         checkpoint = None
-        if self.use_local_model:
+        
+        if self.use_huggingface:
+            # 强制使用 Hugging Face 模型（传字典格式，参考 main.py）
+            print(f"  Model (Hugging Face): ecmwf/aifs-single-1.1")
+            print(f"  Downloading from Hugging Face...")
+            checkpoint = self.CHECKPOINT_HF
+        elif self.use_local_model:
+            # 使用本地模型（传路径字符串，参考 main.py）
             print(f"  Model (local): {self.model_path}")
-            checkpoint = self.model_path
+            checkpoint = str(self.model_path)  # 确保是字符串格式
         else:
-            print(f"  Model (Hugging Face): ecmwf/aifs-single-1.0")
-            print(f"  Local model not found: {self.model_path}")
-            print(f"  Will download from Hugging Face...")
+            # 本地模型不存在，回退到 Hugging Face
+            print(f"  [WARN] Local model not found: {self.model_path}")
+            print(f"  Model (Hugging Face): ecmwf/aifs-single-1.1")
+            print(f"  Downloading from Hugging Face...")
             checkpoint = self.CHECKPOINT_HF
         
         try:
+            # 使用与 main.py 完全相同的初始化方式
             runner = SimpleRunner(checkpoint, device=self.device)
             print(f"[OK] AIFS SimpleRunner initialized successfully")
             return runner
@@ -241,7 +261,7 @@ class AIFSRunner:
 
 
 def run_aifs_forecast(input_state, lead_time=12, datetime_str=None, 
-                     device='cuda', model_path=None, skip_existing=True):
+                     device='cuda', model_path=None, skip_existing=True, use_huggingface=False):
     """
     便捷函数：一键执行 AIFS 预报
     
@@ -250,13 +270,14 @@ def run_aifs_forecast(input_state, lead_time=12, datetime_str=None,
         lead_time: 预报时效（小时）
         datetime_str: 起报时间字符串 'YYYYMMDDHH'
         device: 计算设备 'cuda' 或 'cpu'
-        model_path: 本地模型文件路径（为 None 则使用默认或 Hugging Face）
+        model_path: 本地模型文件路径（为 None 则根据 use_huggingface 决定）
         skip_existing: 是否跳过已存在的文件
+        use_huggingface: 是否使用 Hugging Face 模型（False=本地，True=HF）
         
     返回:
         list: 输出文件路径列表
     """
-    runner = AIFSRunner(device=device, model_path=model_path)
+    runner = AIFSRunner(device=device, model_path=model_path, use_huggingface=use_huggingface)
     return runner.run_forecast(
         input_state,
         lead_time=lead_time,

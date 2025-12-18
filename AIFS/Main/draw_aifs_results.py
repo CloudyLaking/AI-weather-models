@@ -1,6 +1,6 @@
 # AI-weather-models\AIFS\Main\draw_aifs_results.py
 # 可视化 AIFS 天气预报结果（生成专业气象图）
-# 参考 run_AIFS_v1.ipynb 的原始做法
+# 参考 main.py 的方法，使用 ekr.interpolate 插值而非三角剖分（避免卡死）
 
 import os
 import sys
@@ -8,11 +8,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-import matplotlib.tri as tri
 from matplotlib.colors import LinearSegmentedColormap
 import warnings
 
 warnings.filterwarnings("ignore")
+
+try:
+    import earthkit.regrid as ekr
+except ImportError:
+    print("[ERROR] earthkit-regrid not installed, run: pip install earthkit-regrid")
+    sys.exit(1)
 
 
 def _fix_longitudes(lons):
@@ -21,7 +26,7 @@ def _fix_longitudes(lons):
 
 
 class AIFSResultDrawer:
-    """AIFS 天气预报结果绘图类 - 使用notebook原始方法"""
+    """AIFS 天气预报结果绘图类 - 使用 ekr.interpolate 插值方法（参考 main.py）"""
 
     def __init__(self, output_dir="Run-output-png/AIFS", figsize=(15, 12)):
         # 自动定位项目根目录
@@ -49,21 +54,17 @@ class AIFSResultDrawer:
     def draw_mslp_and_wind(self, state, init_datetime_str=None, data_source="AIFS"):
         """
         绘制 MSLP + 10m 风场图
-        使用与 notebook 完全一致的方法：tri.Triangulation
+        参考 main.py 使用 ekr.interpolate 插值到规则网格（避免三角剖分卡死）
         """
         try:
             # 基础校验
-            if "latitudes" not in state or "longitudes" not in state:
-                print("[ERROR] State missing latitudes/longitudes")
-                return None
-            
             fields = state.get("fields", {})
             if "msl" not in fields or "10u" not in fields or "10v" not in fields:
                 print("[ERROR] Required fields not found (msl, 10u, 10v)")
                 print(f"[DEBUG] Available fields: {list(fields.keys())[:10]}...")
                 return None
 
-            # 读取经纬度与数据（与notebook一致的处理方式）
+            # 读取数据（N320 非结构化网格数据）
             def _first_and_flat(arr, arr_name):
                 """展平数组为1D（处理可能的时间维度）"""
                 if not isinstance(arr, np.ndarray):
@@ -76,45 +77,43 @@ class AIFSResultDrawer:
                     arr = arr.reshape(-1)
                 return arr
 
-            latitudes = _first_and_flat(state["latitudes"], "latitudes")
-            longitudes = _first_and_flat(state["longitudes"], "longitudes")
+            mslp_n320 = _first_and_flat(fields["msl"], "msl") / 100.0  # Pa -> hPa
+            u10_n320 = _first_and_flat(fields["10u"], "10u")
+            v10_n320 = _first_and_flat(fields["10v"], "10v")
+
+            print(f"[INFO] Processing N320 data with {mslp_n320.size} grid points")
+
+            # 使用 ekr.interpolate 将 N320 非结构化网格插值到规则网格（参考 main.py）
+            # main.py: ekr.interpolate(ds['fields']['2t'], {"grid": "N320"}, {"grid": (0.25, 0.25)})
+            target_res = (0.25, 0.25)  # 目标分辨率：0.25度
+            print(f"[INFO] Interpolating N320 -> {target_res} grid...")
             
-            mslp = _first_and_flat(fields["msl"], "msl") / 100.0  # Pa -> hPa
-            u10 = _first_and_flat(fields["10u"], "10u")
-            v10 = _first_and_flat(fields["10v"], "10v")
-
-            # 数据验证
-            if not (latitudes.size == longitudes.size == mslp.size == u10.size == v10.size):
-                print(
-                    "[ERROR] Mismatched sizes: "
-                    f"lat={latitudes.size}, lon={longitudes.size}, "
-                    f"msl={mslp.size}, u10={u10.size}, v10={v10.size}"
-                )
-                return None
-
-            print(f"[INFO] Processing {latitudes.size} grid points")
+            mslp_grid = ekr.interpolate(mslp_n320, {"grid": "N320"}, {"grid": target_res})
+            u10_grid = ekr.interpolate(u10_n320, {"grid": "N320"}, {"grid": target_res})
+            v10_grid = ekr.interpolate(v10_n320, {"grid": "N320"}, {"grid": target_res})
+            
+            # 生成规则网格的经纬度（参考 main.py）
+            # main.py: latitudes = np.arange(90,-90.25, -0.25), longitudes = fix(np.arange(0, 360, 0.25))
+            latitudes = np.arange(90, -90.25, -target_res[1])
+            longitudes = np.arange(0, 360, target_res[0])
+            lons, lats = np.meshgrid(longitudes, latitudes)
+            
+            # 修正经度为 -180 到 180（参考 main.py 的 fix 函数）
+            lons_fixed = _fix_longitudes(lons)
+            
+            print(f"[INFO] Interpolation completed: grid shape = {mslp_grid.shape}")
 
             # 计算风速
-            wind_speed = np.sqrt(u10**2 + v10**2)
+            wind_speed = np.sqrt(u10_grid**2 + v10_grid**2)
             max_wind_speed = float(np.max(wind_speed))
-            min_pressure = float(np.min(mslp))
+            min_pressure = float(np.min(mslp_grid))
 
             # 计算预报时效
             forecast_hour = int(
                 (state["date"] - state.get("init_date", state["date"])).total_seconds() / 3600
             )
 
-            # 创建三角剖分（与notebook完全一致）
-            print(f"[INFO] Creating Delaunay triangulation...")
-            import time
-            t0 = time.time()
-            
-            lons_fixed = _fix_longitudes(longitudes)
-            triangulation = tri.Triangulation(lons_fixed, latitudes)
-            
-            print(f"[INFO] Triangulation completed in {time.time()-t0:.2f}s")
-
-            # 绘图
+            # 绘图（使用规则网格，不需要三角剖分）
             fig = plt.figure(figsize=self.figsize)
             ax = plt.axes(projection=ccrs.PlateCarree())
             ax.coastlines()
@@ -140,9 +139,10 @@ class AIFSResultDrawer:
                 list(zip(np.linspace(0, 1, len(wind_speed_levels)), wind_speed_colors)),
             )
 
-            # 风速填色（使用三角网格）
-            contourf = ax.tricontourf(
-                triangulation,
+            # 风速填色（使用规则网格的 contourf）
+            contourf = ax.contourf(
+                lons_fixed,
+                lats,
                 wind_speed,
                 levels=np.linspace(0, 40, 100),
                 cmap=cmap,
@@ -151,9 +151,10 @@ class AIFSResultDrawer:
             )
 
             # 等压线
-            contour = ax.tricontour(
-                triangulation,
-                mslp,
+            contour = ax.contour(
+                lons_fixed,
+                lats,
+                mslp_grid,
                 levels=np.arange(960, 1040, 4),
                 colors="black",
                 linewidths=1.5,

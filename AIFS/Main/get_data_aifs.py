@@ -228,32 +228,34 @@ class AIFSDataDownloader:
                 for f in data:
                     # 提取经纬度（只需第一次）
                     if lats is None or lons is None:
-                        lats_temp = f.to_numpy(flatten=True, dtype=np.float64)  # 获取展平数据
-                        # 使用 earthkit 获取实际的经纬度
+                        # 从 GRIB 字段中提取经纬度（N320网格的原始经纬度）
                         try:
                             coords = f.to_points()  # 返回 (lat, lon) 点坐标
-                            if coords is not None:
+                            if coords is not None and len(coords) > 0:
                                 lats = coords['lat']
                                 lons = coords['lon']
-                                print(f"    [GRID] Extracted grid coordinates: {len(lats)} points")
+                                print(f"    [GRID] Extracted N320 grid coordinates: {len(lats)} points")
                         except:
-                            # 备用方案：从 metadata 中提取
                             pass
                     
                     # Open data 经度范围是 -180 到 180，需要转换到 0-360
+                    # 并且需要roll数组，将 -180:180 转换为 0:360（与 main.py 一致）
                     values = f.to_numpy()
                     
-                    # 插值到 N320 分辨率
+                    # 参考 main.py 的方法：先 roll，再插值
+                    # main.py: values = np.roll(field.to_numpy(), -field.shape[1] // 2, axis=1)
+                    if values.ndim == 2 and values.shape == (721, 1440):
+                        # 这是 0.25x0.25 度的全球网格（721x1440）
+                        # 将经度从 -180:180 roll 到 0:360
+                        values = np.roll(values, -values.shape[1] // 2, axis=1)
+                        print(f"    [ROLL] Shifted longitude from -180:180 to 0:360")
+                    
+                    # 插值到 N320 分辨率（参考 main.py 的方法）
                     print(f"    [INTERP] Interpolating {f.metadata('param')} to N320...")
                     values_interp = ekr.interpolate(
                         values,
                         {"grid": (0.25, 0.25)},  # 源网格分辨率
-                        {"grid": "N320"}  # 目标网格分辨率
-                    )
-                    values_interp = ekr.interpolate(
-                        values,
-                        {"grid": (0.25, 0.25)},  # 源网格分辨率
-                        {"grid": "N320"}  # 目标网格分辨率
+                        {"grid": "N320"}  # 目标网格分辨率（N320 非结构化网格）
                     )
                     
                     # 打印数据统计信息

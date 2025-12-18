@@ -16,8 +16,12 @@ from datetime import datetime, timedelta
 PROJECT_ROOT = None  # 项目根目录。设为None则自动检测，或指定路径如: "/root/AI-weather-models"
 START_YEAR = None    # 起始年份。设为None则自动检测，或指定如: 1950
 
+# === 时间范围限制 ===
+TIME_START = 1950    # 开始年份
+TIME_END = 1965      # 结束年份
+
 # === 绘图参数 ===
-FIG_SIZE = (12, 5)  # 参考5_draw_time_series.py
+FIG_SIZE = (10, 5)  # 参考5_draw_time_series.py
 MAX_HOUR = 999999  # 最大预报时次
 
 # 北半球范围定义（0.25度格网）
@@ -245,6 +249,13 @@ def get_era5_monthly_data(start_year, sorted_months):
     # 加载ERA5数据
     try:
         ds = xr.open_dataset(era5_file)
+        print(f"[DEBUG] ERA5 dataset variables: {list(ds.data_vars)}")
+        print(f"[DEBUG] ERA5 dataset dimensions: {list(ds.dims)}")
+        print(f"[DEBUG] ERA5 dataset coords: {list(ds.coords)}")
+        
+        lat_coord = ds['latitude']
+        lat_slice = slice(LAT_NORTH, LAT_SOUTH) if lat_coord.values[0] > lat_coord.values[-1] else slice(LAT_SOUTH, LAT_NORTH)
+        print(f"[DEBUG] ERA5 latitude order: {lat_coord.values[0]} -> {lat_coord.values[-1]}, use slice {lat_slice}")
         
         # 提取变量（假设变量名为 t2m, u10, v10, mslp）
         t2m_era5 = []
@@ -252,10 +263,38 @@ def get_era5_monthly_data(start_year, sorted_months):
         mslp_era5 = []
         years_era5 = []
         
+        # 确定时间变量名称
+        time_var = 'valid_time' if 'valid_time' in ds.dims else 'time'
+        print(f"[DEBUG] Using time variable: {time_var}")
+        
         for year, month in sorted_months:
             try:
+                # 时间范围过滤
+                if year < TIME_START or year > TIME_END:
+                    continue
+                
                 # 从ERA5数据中提取该月的值
-                month_data = ds.sel(time=f'{year}-{month:02d}')
+                month_str = f'{year}-{month:02d}'
+                
+                # 尝试使用valid_time或time进行选择
+                try:
+                    if time_var == 'valid_time':
+                        month_data = ds.sel(valid_time=month_str)
+                    else:
+                        month_data = ds.sel(time=month_str)
+                except KeyError:
+                    # 如果精确匹配失败，尝试模糊匹配
+                    time_coord = ds[time_var]
+                    matching_times = [t for t in time_coord.values 
+                                     if str(t).startswith(month_str)]
+                    if matching_times:
+                        if time_var == 'valid_time':
+                            month_data = ds.sel(valid_time=matching_times)
+                        else:
+                            month_data = ds.sel(time=matching_times)
+                    else:
+                        print(f"[WARN] No data found for {month_str}")
+                        continue
                 
                 # 计算该月中旬的年份值
                 mid_date = datetime(year, month, 15)
@@ -269,24 +308,34 @@ def get_era5_monthly_data(start_year, sorted_months):
                 years_era5.append(year_value)
                 
                 # 提取NH(10N-60N)的平均值
-                t2m_nh = month_data['t2m'].sel(latitude=slice(10, 60)).mean().values
-                u10_nh = month_data['u10'].sel(latitude=slice(10, 60)).mean().values
-                v10_nh = month_data['v10'].sel(latitude=slice(10, 60)).mean().values
-                mslp_nh = month_data['mslp'].sel(latitude=slice(10, 60)).mean().values
+                t2m_field = month_data['t2m'].sel(latitude=lat_slice)
+                u10_field = month_data['u10'].sel(latitude=lat_slice)
+                v10_field = month_data['v10'].sel(latitude=lat_slice)
+                mslp_field = month_data['msl'].sel(latitude=lat_slice)
+                
+                t2m_nh = t2m_field.mean().values
+                u10_nh = u10_field.mean().values
+                v10_nh = v10_field.mean().values
+                mslp_nh = mslp_field.mean().values
                 
                 t2m_era5.append(float(t2m_nh - 273.15))  # K -> °C
                 wind_era5.append(float(np.sqrt(u10_nh**2 + v10_nh**2)))  # m/s
                 mslp_era5.append(float(mslp_nh / 100.0))  # Pa -> hPa
-            except:
+            except Exception as e:
+                print(f"[DEBUG] Failed to extract {year}-{month}: {e}")
                 continue
         
         if not t2m_era5:
+            print("[WARN] No ERA5 data extracted")
             return None, None, None, None
         
+        print(f"[INFO] Successfully extracted {len(t2m_era5)} months of ERA5 data")
         return t2m_era5, wind_era5, mslp_era5, years_era5
         
     except Exception as e:
-        print(f"[WARN] Failed to load ERA5 data: {e}")
+        print(f"[ERROR] Failed to load ERA5: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None, None, None
 
 def download_era5_data(output_file, start_year, sorted_months):
@@ -379,6 +428,10 @@ def draw_nh_time_series(start_year=None):
     
     print(f"\n[INFO] Computing monthly averages for {len(sorted_months)} months...")
     for year, month in sorted_months:
+        # 时间范围过滤
+        if year < TIME_START or year > TIME_END:
+            continue
+        
         # 计算该月的平均值
         t2m_avg = np.mean(monthly_data[(year, month)]['t2m'])
         wind_avg = np.mean(monthly_data[(year, month)]['wind'])
@@ -412,6 +465,27 @@ def draw_nh_time_series(start_year=None):
     if era5_t2m is None:
         print("[WARN] ERA5 data not available, showing model data only")
         era5_t2m = era5_wind = era5_mslp = None
+    else:
+        # 调试输出：检查数据长度
+        print(f"[DEBUG] Pangu data points: {len(years)}")
+        print(f"[DEBUG] ERA5 data points: {len(era5_years)}")
+        print(f"[DEBUG] Pangu year range: {years[0]:.2f} - {years[-1]:.2f}")
+        print(f"[DEBUG] ERA5 year range: {era5_years[0]:.2f} - {era5_years[-1]:.2f}")
+        
+        # 如果长度不匹配，进行裁剪或对齐
+        if len(years) != len(era5_years):
+            print(f"[WARN] Data length mismatch! Pangu={len(years)}, ERA5={len(era5_years)}")
+            # 仅保留共同的时间范围
+            min_len = min(len(years), len(era5_years))
+            years = years[:min_len]
+            t2m_series = t2m_series[:min_len]
+            wind_series = wind_series[:min_len]
+            mslp_series = mslp_series[:min_len]
+            era5_years = era5_years[:min_len]
+            t2m_era5 = t2m_era5[:min_len]
+            wind_era5 = wind_era5[:min_len]
+            mslp_era5 = mslp_era5[:min_len]
+            print(f"[INFO] Trimmed to {min_len} common data points")
     
     # === 绘图：3个子图竖排 ===
     fig, axes = plt.subplots(3, 1, figsize=FIG_SIZE)
@@ -419,42 +493,72 @@ def draw_nh_time_series(start_year=None):
     # 子图1：2m Temperature
     axes[0].plot(years, t2m_series, color=COLOR_T2M, linewidth=2, marker='o', 
                  markersize=2, label='Pangu')
-    if era5_t2m is not None:
-        axes[0].plot(era5_years, era5_t2m, color='#CC0000', linewidth=1.5, marker='o', 
-                     markersize=1.5, linestyle='--', label='ERA5', alpha=0.7)
     axes[0].set_ylabel('T2m (°C)', color=COLOR_T2M, fontsize=11)
     axes[0].tick_params(axis='y', labelcolor=COLOR_T2M)
     axes[0].grid(True, linestyle='--', alpha=0.3)
-    axes[0].legend(loc='best', fontsize=9)
+    
+    if era5_t2m is not None:
+        ax0_right = axes[0].twinx()
+        ax0_right.plot(era5_years, era5_t2m, color='#990000', linewidth=2, marker='o', 
+                       markersize=2)
+        ax0_right.set_ylabel('ERA5 T2m (°C)', color='#990000', fontsize=11)
+        ax0_right.tick_params(axis='y', labelcolor='#990000')
+        
+        # 统一坐标轴范围，以ERA5为准
+        era5_min, era5_max = min(era5_t2m), max(era5_t2m)
+        era5_range = era5_max - era5_min
+        padding = era5_range * 0.1
+        ax0_right.set_ylim(era5_min - padding, era5_max + padding)
+        axes[0].set_ylim(era5_min - padding, era5_max + padding)
     
     # 子图2：10m Wind Speed
     axes[1].plot(years, wind_series, color=COLOR_WIND, linewidth=2, marker='s', 
                  markersize=2, label='Pangu')
-    if era5_wind is not None:
-        axes[1].plot(era5_years, era5_wind, color='#0066CC', linewidth=1.5, marker='s', 
-                     markersize=1.5, linestyle='--', label='ERA5', alpha=0.7)
     axes[1].set_ylabel('Wind (m/s)', color=COLOR_WIND, fontsize=11)
     axes[1].tick_params(axis='y', labelcolor=COLOR_WIND)
     axes[1].grid(True, linestyle='--', alpha=0.3)
-    axes[1].legend(loc='best', fontsize=9)
+    
+    if era5_wind is not None:
+        ax1_right = axes[1].twinx()
+        ax1_right.plot(era5_years, era5_wind, color='#003399', linewidth=2, marker='s', 
+                       markersize=2)
+        ax1_right.set_ylabel('ERA5 Wind (m/s)', color='#003399', fontsize=11)
+        ax1_right.tick_params(axis='y', labelcolor='#003399')
+        
+        # 统一坐标轴范围，以ERA5为准
+        era5_min, era5_max = min(era5_wind), max(era5_wind)
+        era5_range = era5_max - era5_min
+        padding = era5_range * 0.1
+        ax1_right.set_ylim(era5_min - padding, era5_max + padding)
+        axes[1].set_ylim(era5_min - padding, era5_max + padding)
     
     # 子图3：MSLP
     axes[2].plot(years, mslp_series, color=COLOR_MSLP, linewidth=2, marker='^', 
                  markersize=2, label='Pangu')
-    if era5_mslp is not None:
-        axes[2].plot(era5_years, era5_mslp, color='#2D6600', linewidth=1.5, marker='^', 
-                     markersize=1.5, linestyle='--', label='ERA5', alpha=0.7)
     axes[2].set_ylabel('MSLP (hPa)', color=COLOR_MSLP, fontsize=11)
     axes[2].set_xlabel('Year', fontsize=11)
     axes[2].tick_params(axis='y', labelcolor=COLOR_MSLP)
     axes[2].grid(True, linestyle='--', alpha=0.3)
-    axes[2].legend(loc='best', fontsize=9)
+    
+    if era5_mslp is not None:
+        ax2_right = axes[2].twinx()
+        ax2_right.plot(era5_years, era5_mslp, color='#1a4d00', linewidth=2, marker='^', 
+                       markersize=2)
+        ax2_right.set_ylabel('ERA5 MSLP (hPa)', color='#1a4d00', fontsize=11)
+        ax2_right.tick_params(axis='y', labelcolor='#1a4d00')
+        
+        # 统一坐标轴范围，以ERA5为准
+        era5_min, era5_max = min(era5_mslp), max(era5_mslp)
+        era5_range = era5_max - era5_min
+        padding = era5_range * 0.1
+        ax2_right.set_ylim(era5_min - padding, era5_max + padding)
+        axes[2].set_ylim(era5_min - padding, era5_max + padding)
     
     # 主标题
-    fig.suptitle(f'Pangu Longterm Integration NH({LAT_SOUTH}N-{LAT_NORTH}N) Mean Monthly Time Series',
-                 x=0.08, y=0.98, ha='left', fontsize=14)
+    fig.suptitle(f'Pangu NH({LAT_SOUTH}N-{LAT_NORTH}N) Monthly Mean Time Series',
+                 x=0.08, y=0.92, ha='left', fontsize=14)
     
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
     
     # 保存 - 遵循longterm_integration.py的逻辑
     data_disk = os.path.join(project_root, 'autodl-tmp')
