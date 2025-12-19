@@ -614,6 +614,43 @@ class AIFSDataDownloader:
             
             print(f"\n[OK] Total fields retrieved: {len(fields)}")
             
+            # ===== 诊断 NaN 分布 =====
+            print(f"\n[DIAGNOSTIC] Checking NaN distribution in fields:")
+            for name, data in fields.items():
+                if data is not None and isinstance(data, np.ndarray):
+                    nan_count = np.isnan(data).sum()
+                    nan_percentage = 100 * nan_count / data.size if data.size > 0 else 0
+                    if nan_count > 0:
+                        print(f"  ⚠ {name}: {nan_count} NaN values ({nan_percentage:.2f}%)")
+                        # 检查 NaN 的分布（按维度）
+                        if data.ndim == 1:
+                            nan_indices = np.where(np.isnan(data))[0]
+                            print(f"      └─ NaN indices: {nan_indices[:10]}{'...' if len(nan_indices) > 10 else ''}")
+                        elif data.ndim == 2:
+                            nan_mask = np.isnan(data)
+                            nan_per_row = nan_mask.sum(axis=1)
+                            nan_per_col = nan_mask.sum(axis=0)
+                            rows_with_all_nan = np.where(nan_per_row == data.shape[1])[0]
+                            cols_with_all_nan = np.where(nan_per_col == data.shape[0])[0]
+                            if len(rows_with_all_nan) > 0:
+                                print(f"      └─ Rows with ALL NaN: {rows_with_all_nan}")
+                            if len(cols_with_all_nan) > 0:
+                                print(f"      └─ Cols with ALL NaN: {cols_with_all_nan}")
+                            print(f"      └─ NaN per row (min/max): {nan_per_row.min()}/{nan_per_row.max()}")
+                            print(f"      └─ NaN per col (min/max): {nan_per_col.min()}/{nan_per_col.max()}")
+                        elif data.ndim >= 3:
+                            for t in range(data.shape[0]):
+                                nan_count_t = np.isnan(data[t]).sum()
+                                if nan_count_t > 0:
+                                    nan_mask_2d = np.isnan(data[t])
+                                    nan_per_row = nan_mask_2d.sum(axis=1)
+                                    rows_with_all_nan = np.where(nan_per_row == data[t].shape[1])[0]
+                                    if len(rows_with_all_nan) > 0:
+                                        print(f"      └─ Time step {t}: Rows with ALL NaN: {rows_with_all_nan}")
+                    else:
+                        print(f"  ✓ {name}: No NaN values")
+            # ===== 诊断结束 =====
+            
             # 创建初始状态字典（使用从数据中提取的经纬度）
             input_state = {
                 'date': date,

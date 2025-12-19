@@ -1,14 +1,17 @@
 # AI-weather-models\AIFS\Main\main_aifs_workflow.py
 # 整合工作流编排脚本 - 完整的数据获取、模型预报、绘图流程
-
 # Uncomment the lines below to install the required packages
 
 """
-pip install  anemoi-inference[huggingface]==0.4.9 anemoi-models==0.3.1 torch==2.4.0
-pip install  earthkit-regrid==0.4.0 ecmwf-opendata 
-pip install  flash_attn
+pip install -q anemoi-inference[huggingface]==0.6.3 anemoi-models==0.5.0
+pip install -q torch-geometric==2.4.0
+pip install -q earthkit-regrid==0.4.0 ecmwf-opendata
+pip install  flash_attn  (一般不行，需要手动下载精准对应系统的轮子安装，需查询相关教程)
 pip install  cdsapi cartopy
 
+请预先在系统用户目录中放好 cdsapi 的 .cdsapirc 文件与 ecmwf-opendata 的 .ecmwfapirc 文件
+可运行环境示例 Python 3.12.3 
+vGPU-48GB  (至少要32GB，最好直接上48GB/24*2GB)
 
 """
 
@@ -342,10 +345,10 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
 
 if __name__ == '__main__':
     # ===== 在这里设置运行参数 =====
-    init_datetime = '2025121700'          # 起报时间,None 则自动获取最新
-    lead_time = 6                         # 预报时效(小时),整6小时
+    init_datetime = '2025121000'          # 起报时间,None 则自动获取最新
+    lead_time = 24                         # 预报时效(小时),整6小时
     device = 'cuda'                       # 计算设备:'cuda' 或 'cpu'
-    data_source = 'ECMWF'                 # 数据源:'ECMWF' 或 'ERA5'
+    data_source = 'ERA5'                 # 数据源:'ECMWF' 或 'ERA5'
     draw_results = True                   # 是否绘制结果
     skip_existing = True                  # 是否跳过已存在文件
     use_gpu_interp = False                # 使用三角剖分(False推荐,稳定准确)

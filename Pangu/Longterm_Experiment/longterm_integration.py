@@ -22,7 +22,9 @@ except ImportError as e:
 # ==========================================
 # 配置参数
 # ==========================================
-START_YEAR = 1950  # 初始年份：1950 或 1990
+START_YEAR = 1990  # 初始年份：1950 或 1990
+START_MONTH = 7    # 起报月份（例如 1990 年从 7 月 1 日开始）
+START_DAY = 1      # 起报日
 END_YEAR = 2020    # 结束年份
 MODEL_TYPE = 6     # 使用6h模型（每天积分4次，仅00h保存）
 # ==========================================
@@ -224,7 +226,7 @@ def find_last_saved_full_date(output_full_dir, start_date, end_date):
     
     return last_date
 
-def run_longterm_integration(start_year, end_year=2020):
+def run_longterm_integration(start_year, end_year=2020, start_month=1, start_day=1):
     """执行长期积分"""
     
     project_root = find_project_root()
@@ -233,8 +235,8 @@ def run_longterm_integration(start_year, end_year=2020):
     # 设置目录
     dirs = setup_directories(project_root, start_year)
     
-    # 初始化时间
-    current_date = datetime(start_year, 1, 1, 0)
+    # 初始化时间（支持自定义起报月日）
+    current_date = datetime(start_year, start_month, start_day, 0)
     end_date = datetime(end_year, 12, 31, 0)
     
     print(f"\n{'='*70}")
@@ -373,7 +375,7 @@ def run_longterm_integration(start_year, end_year=2020):
     print(f"\n[STEP 3] Starting long-term integration...")
     
     # 检查是否有已保存的完整数据
-    start_time = datetime(start_year, 1, 1, 0)
+    start_time = datetime(start_year, start_month, start_day, 0)
     last_saved = find_last_saved_full_date(dirs['output_full'], start_time, end_date)
     
     if last_saved and last_saved > start_time:
@@ -498,4 +500,4 @@ if __name__ == '__main__':
     print(f"[INFO] Model type: {MODEL_TYPE}h\n")
     
     # 直接使用配置参数运行
-    run_longterm_integration(START_YEAR, END_YEAR)
+    run_longterm_integration(START_YEAR, END_YEAR, START_MONTH, START_DAY)

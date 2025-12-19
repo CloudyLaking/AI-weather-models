@@ -1,6 +1,6 @@
 # AI-weather-models\AIFS\Main\draw_aifs_results.py
 # 可视化 AIFS 天气预报结果（生成专业气象图）
-# 参考 main.py 的方法，使用 ekr.interpolate 插值而非三角剖分（避免卡死）
+# 参考 Pangu 的绘图方式，处理 AIFS 的 N320 非结构化网格数据
 
 import os
 import sys
@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import LinearSegmentedColormap
+from datetime import datetime
+from scipy.ndimage import gaussian_filter
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -18,11 +20,6 @@ try:
 except ImportError:
     print("[ERROR] earthkit-regrid not installed, run: pip install earthkit-regrid")
     sys.exit(1)
-
-
-def _fix_longitudes(lons):
-    """将经度 0-360 转换为 -180-180（与notebook一致）"""
-    return np.where(lons > 180, lons - 360, lons)
 
 
 class AIFSResultDrawer:
@@ -51,27 +48,33 @@ class AIFSResultDrawer:
         os.makedirs(source_dir, exist_ok=True)
         return os.path.join(source_dir, filename)
 
-    def draw_mslp_and_wind(self, state, init_datetime_str=None, data_source="AIFS"):
+    def draw_mslp_and_wind(self, state, init_datetime_str=None, data_source="AIFS", 
+                          lon_range=None, lat_range=None):
         """
-        绘制 MSLP + 10m 风场图
-        参考 main.py 使用 ekr.interpolate 插值到规则网格（避免三角剖分卡死）
+        绘制 MSLP + 10m 风场图（参考 Pangu 的绘图方式）
+        
+        参数:
+            state: AIFS 模型状态字典
+            init_datetime_str: 初始化时间字符串
+            data_source: 数据源标识
+            lon_range: 绘图经度范围 [lon_min, lon_max]，None 表示全球
+            lat_range: 绘图纬度范围 [lat_min, lat_max]，None 表示全球
         """
         try:
             # 基础校验
             fields = state.get("fields", {})
             if "msl" not in fields or "10u" not in fields or "10v" not in fields:
                 print("[ERROR] Required fields not found (msl, 10u, 10v)")
-                print(f"[DEBUG] Available fields: {list(fields.keys())[:10]}...")
                 return None
 
-            # 读取数据（N320 非结构化网格数据）
+            # 读取并处理数据（处理 N320 非结构化网格）
             def _first_and_flat(arr, arr_name):
                 """展平数组为1D（处理可能的时间维度）"""
                 if not isinstance(arr, np.ndarray):
                     raise ValueError(f"{arr_name} is not ndarray")
                 if arr.ndim > 1:
                     if arr.shape[0] > 1:
-                        arr = arr[0]  # 取第一个时间步
+                        arr = arr[0]
                     arr = arr.reshape(-1)
                 else:
                     arr = arr.reshape(-1)
@@ -83,37 +86,63 @@ class AIFSResultDrawer:
 
             print(f"[INFO] Processing N320 data with {mslp_n320.size} grid points")
 
-            # 使用 ekr.interpolate 将 N320 非结构化网格插值到规则网格（参考 main.py）
-            # main.py: ekr.interpolate(ds['fields']['2t'], {"grid": "N320"}, {"grid": (0.25, 0.25)})
-            target_res = (0.25, 0.25)  # 目标分辨率：0.25度
-            print(f"[INFO] Interpolating N320 -> {target_res} grid...")
+            # N320 → 0.25x0.25 度插值
+            print(f"[INFO] Interpolating N320 -> (0.25, 0.25) grid...")
+            mslp_grid = ekr.interpolate(mslp_n320, {"grid": "N320"}, {"grid": (0.25, 0.25)})
+            u10_grid = ekr.interpolate(u10_n320, {"grid": "N320"}, {"grid": (0.25, 0.25)})
+            v10_grid = ekr.interpolate(v10_n320, {"grid": "N320"}, {"grid": (0.25, 0.25)})
             
-            mslp_grid = ekr.interpolate(mslp_n320, {"grid": "N320"}, {"grid": target_res})
-            u10_grid = ekr.interpolate(u10_n320, {"grid": "N320"}, {"grid": target_res})
-            v10_grid = ekr.interpolate(v10_n320, {"grid": "N320"}, {"grid": target_res})
+            # 转换为 numpy 数组并确保二维
+            mslp_grid = np.asarray(mslp_grid).squeeze()
+            u10_grid = np.asarray(u10_grid).squeeze()
+            v10_grid = np.asarray(v10_grid).squeeze()
             
-            # 生成规则网格的经纬度（参考 main.py）
-            # main.py: latitudes = np.arange(90,-90.25, -0.25), longitudes = fix(np.arange(0, 360, 0.25))
-            latitudes = np.arange(90, -90.25, -target_res[1])
-            longitudes = np.arange(0, 360, target_res[0])
-            lons, lats = np.meshgrid(longitudes, latitudes)
+            print(f"[DEBUG] Interpolated shapes: mslp={mslp_grid.shape}, u10={u10_grid.shape}, v10={v10_grid.shape}")
             
-            # 修正经度为 -180 到 180（参考 main.py 的 fix 函数）
-            lons_fixed = _fix_longitudes(lons)
+            # 诊断 NaN
+            print(f"\n[DIAGNOSTIC] Checking NaN in interpolated data:")
+            for name, data in [("MSLP", mslp_grid), ("U10", u10_grid), ("V10", v10_grid)]:
+                nan_count = np.isnan(data).sum()
+                nan_pct = 100 * nan_count / data.size if data.size > 0 else 0
+                print(f"  {name}: NaN count={nan_count} ({nan_pct:.2f}%)")
             
-            print(f"[INFO] Interpolation completed: grid shape = {mslp_grid.shape}")
-
+            # 构建网格（标准 0.25x0.25 度全球网格）
+            lat = np.linspace(90, -90, mslp_grid.shape[0])
+            lon = np.linspace(0, 360, mslp_grid.shape[1])
+            lon_grid, lat_grid = np.meshgrid(lon, lat)
+            
             # 计算风速
             wind_speed = np.sqrt(u10_grid**2 + v10_grid**2)
-            max_wind_speed = float(np.max(wind_speed))
-            min_pressure = float(np.min(mslp_grid))
+            
+            # 应用高斯平滑（参考 Pangu）
+            print("[INFO] Applying Gaussian smoothing...")
+            mslp_smooth = gaussian_filter(mslp_grid, sigma=2.0)
+            wind_speed_smooth = gaussian_filter(wind_speed, sigma=2.0)
+            
+            # 如果指定了范围，则提取该范围内的数据；否则使用全球
+            if lon_range is not None and lat_range is not None:
+                lon_min, lon_max = lon_range
+                lat_min, lat_max = lat_range
+                lon_idx = np.where((lon_grid[0, :] >= lon_min) & (lon_grid[0, :] <= lon_max))[0]
+                lat_idx = np.where((lat_grid[:, 0] >= lat_min) & (lat_grid[:, 0] <= lat_max))[0]
+                
+                mslp_smooth = mslp_smooth[np.ix_(lat_idx, lon_idx)]
+                wind_speed_smooth = wind_speed_smooth[np.ix_(lat_idx, lon_idx)]
+                u10_grid = u10_grid[np.ix_(lat_idx, lon_idx)]
+                v10_grid = v10_grid[np.ix_(lat_idx, lon_idx)]
+                lon_grid = lon_grid[np.ix_(lat_idx, lon_idx)]
+                lat_grid = lat_grid[np.ix_(lat_idx, lon_idx)]
+                print(f"[INFO] Extracted region: lon=[{lon_min}, {lon_max}], lat=[{lat_min}, {lat_max}]")
+            
+            max_wind_speed = np.max(wind_speed_smooth)
+            min_pressure = np.min(mslp_smooth)
 
             # 计算预报时效
             forecast_hour = int(
                 (state["date"] - state.get("init_date", state["date"])).total_seconds() / 3600
             )
 
-            # 绘图（使用规则网格，不需要三角剖分）
+            # 绘图（参考 Pangu 的绘图方式）
             fig = plt.figure(figsize=self.figsize)
             ax = plt.axes(projection=ccrs.PlateCarree())
             ax.coastlines()
@@ -139,23 +168,22 @@ class AIFSResultDrawer:
                 list(zip(np.linspace(0, 1, len(wind_speed_levels)), wind_speed_colors)),
             )
 
-            # 风速填色（使用规则网格的 contourf）
+            # 风速填色
             contourf = ax.contourf(
-                lons_fixed,
-                lats,
-                wind_speed,
+                lon_grid,
+                lat_grid,
+                wind_speed_smooth,
                 levels=np.linspace(0, 40, 100),
                 cmap=cmap,
                 transform=ccrs.PlateCarree(),
-                extend="both",
             )
 
             # 等压线
             contour = ax.contour(
-                lons_fixed,
-                lats,
-                mslp_grid,
-                levels=np.arange(960, 1040, 4),
+                lon_grid,
+                lat_grid,
+                mslp_smooth,
+                levels=np.arange(np.min(mslp_smooth), np.max(mslp_smooth), 1),
                 colors="black",
                 linewidths=1.5,
                 transform=ccrs.PlateCarree(),
