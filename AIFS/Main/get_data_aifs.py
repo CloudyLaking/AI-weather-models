@@ -5,6 +5,7 @@ import os
 import sys
 import numpy as np
 import atexit
+import xarray as xr
 
 # 抑制临时文件清理错误（Windows特定）
 def _suppress_tempfile_cleanup_errors():
@@ -69,6 +70,8 @@ except ImportError:
 class AIFSDataDownloader:
     """AIFS 数据下载和转换类 - 从 ECMWF Open Data 获取数据并转换为 NPY 格式"""
     
+    N320_POINTS = 542080
+
     # AIFS 支持的参数列表
     PARAM_SFC = ["10u", "10v", "2d", "2t", "msl", "skt", "sp", "tcw", "lsm", "z", "slor", "sdor"]
     PARAM_SOIL = ["vsw", "sot"]
@@ -106,6 +109,30 @@ class AIFSDataDownloader:
                         print(f"  ✓ {key}: min={arr.min():.4f}, max={arr.max():.4f}")
         except Exception as e:
             pass  # 如果出错就不打印，不影响程序运行
+
+    def _to_n320_vector(self, data, field_name):
+        """将规则网格字段插值到 N320 非结构化网格"""
+        arr = np.asarray(data)
+        if arr.ndim == 1:
+            if arr.size != self.N320_POINTS:
+                raise ValueError(f"Unexpected vector size for {field_name}: {arr.size}")
+            return arr
+
+        # 允许 (time, lat, lon) 或 (lat, lon)
+        if arr.ndim == 3:
+            arr = arr[0]
+        if arr.ndim != 2:
+            raise ValueError(f"Unsupported shape for {field_name}: {arr.shape}")
+
+        interp = ekr.interpolate(arr, {"grid": (0.25, 0.25)}, {"grid": "N320"})
+        arr_interp = np.asarray(interp).reshape(-1)
+        print(f"    [REGRID] {field_name}: min={arr_interp.min():.4f}, max={arr_interp.max():.4f}")
+        return arr_interp
+
+    @staticmethod
+    def _log_field_stats(field_name, array, indent="    "):
+        arr = np.asarray(array)
+        print(f"{indent}[OK] {field_name}: shape={arr.shape}, min={arr.min():.4f}, max={arr.max():.4f}")
     
     def __init__(self, input_dir='Input/AIFS', 
                  raw_input_dir='Input/AIFS_raw'):
@@ -366,28 +393,35 @@ class AIFSDataDownloader:
             ds_single = xr.open_dataset(single_level_file)
             
             # 参数映射（ERA5变量名 -> AIFS字段名）
+            # ERA5使用缩写名称而非完整名称
             mapping = {
-                '10m_u_component_of_wind': '10u',
-                '10m_v_component_of_wind': '10v',
-                '2m_dewpoint_temperature': '2d',
-                '2m_temperature': '2t',
-                'mean_sea_level_pressure': 'msl',
-                'skin_temperature': 'skt',
-                'surface_pressure': 'sp',
-                'total_column_water': 'tcw',
-                'land_sea_mask': 'lsm',
-                'geopotential': 'z',
-                'slope_of_topography': 'slor',
-                'standard_deviation_of_topography': 'sdor',
+                'u10': '10u',
+                'v10': '10v',
+                'd2m': '2d',
+                't2m': '2t',
+                'msl': 'msl',
+                'skt': 'skt',
+                'sp': 'sp',
+                'tcw': 'tcw',
+                'lsm': 'lsm',
+                'z': 'z',
+                'slor': 'slor',
+                'sdfor': 'sdor',  # ERA5使用sdfor，需要映射回sdor
             }
             
             for era5_var, aifs_var in mapping.items():
                 if era5_var in ds_single.data_vars:
                     # 提取并扩展为2个时间步（模拟与前6小时数据）
-                    data = ds_single[era5_var].values
-                    # 复制为两个时间步
-                    fields[aifs_var] = np.stack([data, data])
-                    print(f"    [OK] {aifs_var}")
+                    # 处理valid_time维度
+                    data_var = ds_single[era5_var]
+                    if 'valid_time' in data_var.dims:
+                        data = data_var.isel(valid_time=0).values
+                    else:
+                        data = data_var.values
+                    grid_vector = self._to_n320_vector(data, aifs_var)
+                    stacked = np.stack([grid_vector, grid_vector])
+                    fields[aifs_var] = stacked
+                    self._log_field_stats(aifs_var, stacked)
             
             ds_single.close()
             print(f"  [OK] Retrieved {len(fields)} single-level parameters")
@@ -425,24 +459,30 @@ class AIFSDataDownloader:
             
             # 提取气压层数据
             pressure_vars = {
-                'geopotential': 'z',
-                'temperature': 't',
-                'u_component_of_wind': 'u',
-                'v_component_of_wind': 'v',
-                'specific_humidity': 'q',
-                'vertical_velocity': 'w',
+                'z': 'z',
+                't': 't',
+                'u': 'u',
+                'v': 'v',
+                'q': 'q',
+                'w': 'w',
             }
             
             pl_count = 0
             for era5_var, aifs_base in pressure_vars.items():
                 if era5_var in ds_pressure.data_vars:
-                    data = ds_pressure[era5_var].values  # Shape: (levels, lat, lon)
+                    # 处理valid_time维度
+                    data_var = ds_pressure[era5_var]
+                    if 'valid_time' in data_var.dims:
+                        data = data_var.isel(valid_time=0).values  # Shape: (levels, lat, lon)
+                    else:
+                        data = data_var.values
                     
                     # 逐个压力层处理
                     for i, level in enumerate(self.LEVELS):
                         field_name = f"{aifs_base}_{level}"
-                        # 扩展为2个时间步
-                        fields[field_name] = np.stack([data[i], data[i]])
+                        grid_vector = self._to_n320_vector(data[i], field_name)
+                        fields[field_name] = np.stack([grid_vector, grid_vector])
+                        self._log_field_stats(field_name, fields[field_name])
                         pl_count += 1
             
             ds_pressure.close()
@@ -456,19 +496,20 @@ class AIFSDataDownloader:
                 request = {
                     'product_type': 'reanalysis',
                     'variable': [
-                        'soil_temperature_level_1', 'soil_temperature_level_2',
-                        'volumetric_soil_water_level_1', 'volumetric_soil_water_level_2',
+                        'stl1', 'stl2',  # explicit short names avoid MARS ambiguity
+                        'swvl1', 'swvl2',
                     ],
                     'year': year,
                     'month': month,
                     'day': day,
                     'time': hour,
-                    'format': 'netcdf',
+                    'data_format': 'netcdf',
                 }
                 
                 try:
                     print(f"  [DOWNLOAD] Fetching soil data...")
-                    client.retrieve('reanalysis-era5-land', request, soil_file)
+                    # Use the same CDS collection as the other ERA5 steps to avoid missing fields.
+                    client.retrieve('reanalysis-era5-single-levels', request, soil_file)
                     print(f"  [OK] Downloaded: {soil_file}")
                 except Exception as e:
                     print(f"  [WARN] Soil data unavailable: {e}")
@@ -478,17 +519,23 @@ class AIFSDataDownloader:
                 ds_soil = xr.open_dataset(soil_file)
                 
                 soil_mapping = {
-                    'soil_temperature_level_1': 'stl1',
-                    'soil_temperature_level_2': 'stl2',
-                    'volumetric_soil_water_level_1': 'swvl1',
-                    'volumetric_soil_water_level_2': 'swvl2',
+                    'stl1': 'stl1',
+                    'stl2': 'stl2',
+                    'swvl1': 'swvl1',
+                    'swvl2': 'swvl2',
                 }
                 
                 for era5_var, aifs_var in soil_mapping.items():
                     if era5_var in ds_soil.data_vars:
-                        data = ds_soil[era5_var].values
-                        fields[aifs_var] = np.stack([data, data])
-                        print(f"    [OK] {aifs_var}")
+                        # 处理valid_time维度
+                        data_var = ds_soil[era5_var]
+                        if 'valid_time' in data_var.dims:
+                            data = data_var.isel(valid_time=0).values
+                        else:
+                            data = data_var.values
+                        grid_vector = self._to_n320_vector(data, aifs_var)
+                        fields[aifs_var] = np.stack([grid_vector, grid_vector])
+                        self._log_field_stats(aifs_var, fields[aifs_var])
                 
                 ds_soil.close()
             
@@ -613,43 +660,6 @@ class AIFSDataDownloader:
                     print(f"    └─ {name}: shape={data.shape}, min={data.min():.4f}, max={data.max():.4f}")
             
             print(f"\n[OK] Total fields retrieved: {len(fields)}")
-            
-            # ===== 诊断 NaN 分布 =====
-            print(f"\n[DIAGNOSTIC] Checking NaN distribution in fields:")
-            for name, data in fields.items():
-                if data is not None and isinstance(data, np.ndarray):
-                    nan_count = np.isnan(data).sum()
-                    nan_percentage = 100 * nan_count / data.size if data.size > 0 else 0
-                    if nan_count > 0:
-                        print(f"  ⚠ {name}: {nan_count} NaN values ({nan_percentage:.2f}%)")
-                        # 检查 NaN 的分布（按维度）
-                        if data.ndim == 1:
-                            nan_indices = np.where(np.isnan(data))[0]
-                            print(f"      └─ NaN indices: {nan_indices[:10]}{'...' if len(nan_indices) > 10 else ''}")
-                        elif data.ndim == 2:
-                            nan_mask = np.isnan(data)
-                            nan_per_row = nan_mask.sum(axis=1)
-                            nan_per_col = nan_mask.sum(axis=0)
-                            rows_with_all_nan = np.where(nan_per_row == data.shape[1])[0]
-                            cols_with_all_nan = np.where(nan_per_col == data.shape[0])[0]
-                            if len(rows_with_all_nan) > 0:
-                                print(f"      └─ Rows with ALL NaN: {rows_with_all_nan}")
-                            if len(cols_with_all_nan) > 0:
-                                print(f"      └─ Cols with ALL NaN: {cols_with_all_nan}")
-                            print(f"      └─ NaN per row (min/max): {nan_per_row.min()}/{nan_per_row.max()}")
-                            print(f"      └─ NaN per col (min/max): {nan_per_col.min()}/{nan_per_col.max()}")
-                        elif data.ndim >= 3:
-                            for t in range(data.shape[0]):
-                                nan_count_t = np.isnan(data[t]).sum()
-                                if nan_count_t > 0:
-                                    nan_mask_2d = np.isnan(data[t])
-                                    nan_per_row = nan_mask_2d.sum(axis=1)
-                                    rows_with_all_nan = np.where(nan_per_row == data[t].shape[1])[0]
-                                    if len(rows_with_all_nan) > 0:
-                                        print(f"      └─ Time step {t}: Rows with ALL NaN: {rows_with_all_nan}")
-                    else:
-                        print(f"  ✓ {name}: No NaN values")
-            # ===== 诊断结束 =====
             
             # 创建初始状态字典（使用从数据中提取的经纬度）
             input_state = {

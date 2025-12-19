@@ -352,7 +352,7 @@ if __name__ == '__main__':
     draw_results = True                   # 是否绘制结果
     skip_existing = True                  # 是否跳过已存在文件
     use_gpu_interp = False                # 使用三角剖分(False推荐,稳定准确)
-    interp_res = 0.5                      # 插值分辨率(度):仅use_gpu_interp=True时有效
+    interp_res = 0.25                      # 插值分辨率(度):仅use_gpu_interp=True时有效
     
     # ===== 模型源选择参数 =====
     use_huggingface = False               # False=使用本地模型, True=使用Hugging Face模型
