@@ -765,7 +765,7 @@ def get_aifs_data(datetime_str=None, data_source='ECMWF', skip_existing=True):
 
 if __name__ == '__main__':
     # 示例用法
-    input_state = get_aifs_data(datetime_str='2023040100', data_source='ERA5', skip_existing=True)
+    input_state = get_aifs_data(datetime_str='2024110900', data_source='ERA5', skip_existing=True)
     
     if input_state:
         print(f"\n[INFO] Input state retrieved successfully")

@@ -1,10 +1,7 @@
-# AI-weather-models 工作区结构说明
-
-## 工作区概述
-本工作区根目录位于 `c:\Users\lyz13\OneDrive\Desktop\AI-weather-models\`，是一个集成多个 AI 气象模型的统一环境。
+# AI-weather-models 
+本工作区是一个集成多个 AI 气象模型的统一环境。
 
 **重点**：
-- 大 AI-weather-models 是工作区根目录
 - 小 AI-weather-models/ 文件夹包含项目源代码（Pangu、Fuxi、AIFS 等）
 - Input、Output、Models-weights、Run-output-png 等数据目录与小 AI-weather-models 文件夹**平行**，位于工作区根目录
 
@@ -39,6 +36,10 @@ c:\Users\lyz13\OneDrive\Desktop\AI-weather-models\  (工作区根目录)
 │  │  ├─ draw-aifs-from-open-store/     # AIFS 可视化代码
 │  │  │  └─ draw_aifs_snow.py           # AIFS 降雪可视化脚本
 │  │  ├─ Main/
+│  │  │  ├─ get_data_aifs.py            # 数据获取模块
+│  │  │  ├─ run_aifs.py                 # 模型执行模块
+│  │  │  ├─ draw_aifs_results.py        # 结果可视化模块
+│  │  │  └─ main_aifs_workflow.py       # 工作流集成模块
 │  │  └─ ...
 │  ├─ aifs-open-data/                   # 开源 AIFS 数据存储（GRIB2 格式）
 │  ├─ aifs-open-data-output-png/        # 开源 AIFS 可视化输出
@@ -206,34 +207,133 @@ Run-output-png/Pangu/  (可视化结果)
 - 可视化输出在 `Run-output-png/Fuxi/`
 
 ### AIFS 模型
-**代码位置**：`AI-weather-models/AIFS/draw-aifs-from-open-store/`
-- 主要脚本：`draw_aifs_snow.py`（AIFS 降雪可视化）
-- 输入数据：`AI-weather-models/aifs-open-data/`（开源 GRIB2 数据）
-- 可视化输出：`AI-weather-models/aifs-open-data-output-png/`
+**核心代码位置**：`AI-weather-models/AIFS/Main/`
+- **get_data_aifs.py**：数据获取与预处理
+  - 支持从 ECMWF Open Data（最新实时数据）或 ERA5 CDS API（历史再分析数据）获取初始条件
+  - 将原始 GRIB2/NC 数据转换为 NPZ 格式（N320 高斯格点 → 规则经纬网格插值）
+  - 输出到 `Input/AIFS/`
+  
+- **run_aifs.py**：模型执行
+  - 基于 anemoi-inference 框架加载并运行 AIFS 模型
+  - 支持本地模型权重（`Models-weights/AIFS/aifs-single-mse-1.1.ckpt`）或 Hugging Face 自动下载
+  - 支持 GPU 加速，输出到 `Output/AIFS/`（NPZ 格式）
+  
+- **draw_aifs_results.py**：可视化绘图
+  - 读取 `Output/AIFS/` 的预报数据，使用 Cartopy 生成气象图
+  - 输出到 `Run-output-png/AIFS/`
+  
+- **main_aifs_workflow.py**：完整工作流
+  - 集成上述三个模块，按顺序执行：数据获取 → 模型推理 → 结果可视化
+  - 支持参数配置（初始时间、预报时效、数据源、分辨率等）
+
+**附加工具**：
+- `AIFS/draw-aifs-from-open-store/draw_aifs_snow.py`：直接读取 AIFS 开源 GRIB2 数据绘制降雪图
+- `AIFS/Longterm_Experiment/`：长期积分实验相关代码
+
+**数据流向**：
+```
+外部数据源（ECMWF Open Data / ERA5 CDS API）
+         ↓
+AIFS/Main/get_data_aifs.py（下载 + N320 格点插值）
+         ↓
+Input/AIFS_raw/（原始 GRIB2 文件） → Input/AIFS/（NPZ 格式）
+         ↓
+AIFS/Main/run_aifs.py  （+ Models-weights/AIFS/aifs-single-mse-1.1.ckpt）
+         ↓
+Output/AIFS/（各预报时次 NPZ 文件）
+         ↓
+AIFS/Main/draw_aifs_results.py
+         ↓
+Run-output-png/AIFS/（可视化 PNG 图片）
+```
+
+## 系统要求
+
+### Pangu 模型
+| 项目 | 要求 |
+|------|------|
+| Python | >= 3.10 |
+| GPU 显存 | ≥ 8 GB（推荐 16 GB+） |
+| 关键依赖 | `onnxruntime-gpu`、`cdsapi`、`xarray`、`numpy`、`cartopy`、`eccodes` |
+| 模型权重 | `pangu_weather_6.onnx` / `pangu_weather_24.onnx`（ONNX 格式） |
+| 数据源配置 | `~/.cdsapirc`（ERA5 数据）或 GFS 公开接口 |
+
+### FuXi 模型
+| 项目 | 要求 |
+|------|------|
+| Python | >= 3.10 |
+| GPU 显存 | ≥ 16 GB |
+| 关键依赖 | `onnxruntime-gpu`、`xarray`、`numpy`、`pandas` |
+| 模型权重 | `short.onnx` / `medium.onnx` / `long.onnx`（ONNX 格式） |
+
+### AIFS 模型（v1.2.0）
+| 项目 | 要求 |
+|------|------|
+| Python | 3.12.3（推荐） |
+| GPU 显存 | ≥ 32 GB（推荐 48 GB 或 双卡 24 GB） |
+| 关键依赖 | 见下方 |
+| 模型权重 | `aifs-single-mse-1.1.ckpt`（PyTorch checkpoint） |
+| 数据源配置 | `~/.cdsapirc`（ERA5）、`~/.ecmwfapirc`（ECMWF Open Data） |
+
+**AIFS 关键 Python 包**：
+```
+anemoi-inference[huggingface]==0.6.3
+anemoi-models==0.5.0
+torch-geometric==2.4.0
+earthkit-regrid==0.4.0
+ecmwf-opendata
+cdsapi
+cartopy
+flash_attn  # 需手动下载与 CUDA/PyTorch 版本精确匹配的 wheel 安装
+```
+
+> **注意**：`flash_attn` 需根据系统 CUDA 版本和 PyTorch 版本手动选择对应 wheel 文件安装，不能直接 `pip install flash_attn`。
+
+---
 
 ## 快速开始
 
-### 完整工作流（推荐）
+### Pangu - 完整工作流（推荐）
 ```bash
 cd AI-weather-models/Pangu/Main/
-python main-pangu-workflow.py \
+python main_pangu_workflow.py \
     --data-source GFS \
     --init-datetime 2025121200 \
     --model-type 24 \
     --run-times 8
 ```
 
-### 独立运行各步骤
+### Pangu - 独立运行各步骤
 ```bash
 # 第1步：获取并转换数据到 Input/Pangu/
 cd AI-weather-models/Pangu/Main/
-python get-data-pangu.py
+python get_data_pangu.py
 
 # 第2步：运行模型推理，输出到 Output/Pangu/
-python run-pangu.py
+python run_pangu.py
 
 # 第3步：绘制可视化图片到 Run-output-png/Pangu/
-python draw-pangu-results.py
+python draw_pangu_results.py
+```
+
+### AIFS - 完整工作流
+```bash
+cd AI-weather-models/AIFS/Main/
+python main_aifs_workflow.py
+```
+
+### AIFS - 独立运行各步骤
+```bash
+cd AI-weather-models/AIFS/Main/
+
+# 第1步：获取并转换数据到 Input/AIFS/
+python get_data_aifs.py
+
+# 第2步：运行模型推理，输出到 Output/AIFS/
+python run_aifs.py
+
+# 第3步：绘制可视化图片到 Run-output-png/AIFS/
+python draw_aifs_results.py
 ```
 
 ## 文件路径说明
@@ -256,7 +356,7 @@ python draw-pangu-results.py
 A repository for AI weather models run, research and application
 
 
-# 1.0
+# 版本历史
 
 ## 1.1.0
 - inherit from old repository
@@ -266,6 +366,13 @@ A repository for AI weather models run, research and application
 - contain Fuxi, Pangu, AIFS 1.0
 - Fuxi has not been reconstructed
 - now add AIFS-ENS 1.0
-
 - aim to build a unified repository for AI weather models
+
+## 1.2.0
+- AIFS 完整工作流跑通（anemoi-inference 0.6.3 + anemoi-models 0.5.0）
+- AIFS Main/ 目录新增 `get_data_aifs.py`、`run_aifs.py`、`draw_aifs_results.py`、`main_aifs_workflow.py`
+- AIFS 支持 ECMWF Open Data 和 ERA5 双数据源输入
+- AIFS 支持 GPU 加速插值（比 CPU 三角剖分快约 60–120 倍）
+- AIFS 支持本地模型权重和 Hugging Face 两种加载方式
+- README 补充 AIFS 完整说明、各模型系统要求汇总
 

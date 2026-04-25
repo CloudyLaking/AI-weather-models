@@ -29,7 +29,7 @@ def plot_aifs_snow(lon_range=(100, 125), lat_range=(22, 42),
       download: Whether to download the file (default: True)
     """
     # Set font path and load font
-    font_path = r"AI-weather-models\MiSans VF.ttf"
+    font_path = r"AI-weather-models/MiSans VF.ttf"
     myfont = fm.FontProperties(fname=font_path)
 
     # Construct download URL and local save path — extract date from init_time
@@ -169,4 +169,4 @@ def plot_aifs_snow(lon_range=(100, 125), lat_range=(22, 42),
 if __name__ == "__main__":
     # Default longitude and latitude range: [110, 130, 25, 37]. Modify init_time and lead_time as needed.
     plot_aifs_snow(lon_range=(100, 135), lat_range=(23, 45),
-                   init_time="20251212000000", lead_time="360h", download=True)
+                   init_time="20260424000000", lead_time="360h", download=True)

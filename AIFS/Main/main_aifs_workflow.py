@@ -257,7 +257,8 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
         # 为了绘图,我们需要重新运行获取所有预报状态
         print(f"[INFO] Retrieving forecast states for visualization...")
         for state in runner.runner.run(input_state=input_state, lead_time=lead_time):
-            forecast_states.append(state)
+            import copy
+            forecast_states.append(copy.deepcopy(state))
         
         print(f"[OK] Retrieved {len(forecast_states)} forecast states")
         
@@ -345,7 +346,7 @@ def run_complete_aifs_workflow(init_datetime_str=None, lead_time=12,
 
 if __name__ == '__main__':
     # ===== 在这里设置运行参数 =====
-    init_datetime = '2025121000'          # 起报时间,None 则自动获取最新
+    init_datetime = '2024110900'          # 起报时间,None 则自动获取最新
     lead_time = 24                         # 预报时效(小时),整6小时
     device = 'cuda'                       # 计算设备:'cuda' 或 'cpu'
     data_source = 'ERA5'                 # 数据源:'ECMWF' 或 'ERA5'
